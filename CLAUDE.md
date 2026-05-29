@@ -4,9 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Greenfield. The directory is empty; nothing has been built yet. The sections below
-describe the **intended** design so the first implementation stays coherent. Treat the
-package layout and file locations as conventions to establish, not as existing code to read.
+MVP implemented. The package layout below exists and builds (`go build .`). The tool
+launches mihomo as a background subprocess and exposes four screens (dashboard,
+subscriptions, nodes) over the Bubble Tea runtime. Keep changes coherent with the
+architecture notes here.
 
 `mihomo-king` is a small Linux TUI for managing a [mihomo](https://github.com/MetaCubeX/mihomo)
 (Clash.Meta) proxy. Scope is deliberately small:
@@ -95,16 +96,18 @@ This keeps "which subscription", "is TUN on", and "which node" independent.
 
 ### Process & privilege model (TUN needs root)
 
-TUN requires `CAP_NET_ADMIN` + `CAP_NET_RAW`. Decide how mihomo is launched (flag this as an open
-decision — pick one and document it in code):
+**Decided & implemented: setcap + spawn.** The tool spawns mihomo as a detached
+background subprocess (`Setpgid` so it outlives the TUI), tracks it via a PID file under
+the app dir, and stops it with `SIGTERM` to the process group. TUN requires
+`CAP_NET_ADMIN` + `CAP_NET_RAW`, granted once to the binary:
+`sudo setcap cap_net_admin,cap_net_raw=ep <mihomo>`. The dashboard warns (via `getcap`)
+when TUN is on but the caps are missing. `internal/mihomo/process.go` owns this.
 
-- **systemd service** (most robust for a persistent proxy): tool runs `systemctl --user`/`system`
-  start/stop/restart and talks to the API. Survives TUI exit.
-- **setcap + spawn**: `sudo setcap cap_net_admin,cap_net_raw=ep <mihomo>` once, then the tool
-  spawns mihomo as a detached background process with a PID file. Simplest UX, no per-run sudo.
-- **sudo/pkexec spawn**: prompts for privileges each launch.
+Alternative not taken: a **systemd service** (more robust for a persistent proxy) — swap
+out `internal/mihomo` for `systemctl` calls if that's ever preferred.
 
-Always launch mihomo with its data dir so caches/GeoIP resolve: `mihomo -d ~/.config/mihomo -f <active.yaml>`.
+mihomo is always launched with its data dir so caches/GeoIP resolve:
+`mihomo -d ~/.config/mihomo -f <active config.yaml>`.
 
 ## Suggested package layout (keep flat & simple)
 
