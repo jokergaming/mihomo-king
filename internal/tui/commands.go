@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -15,12 +16,13 @@ import (
 // --- messages ---
 
 type statusMsg struct {
-	running bool
-	pid     int
-	version string
-	mode    string
-	tun     bool
-	capWarn bool
+	running    bool
+	pid        int
+	version    string
+	mode       string
+	tun        bool
+	capWarn    bool
+	foreignTun []string // other live TUN devices (e.g. another clash's "Meta")
 }
 
 type groupsMsg struct {
@@ -63,6 +65,7 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 		}
 		if s.TunEnable {
 			msg.capWarn = mihomo.MissingTunCaps(s)
+			msg.foreignTun = mihomo.ForeignTunDevices(s.TunDevice)
 		}
 		return msg
 	}
@@ -142,7 +145,13 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 func loadGroupsCmd(s *config.Settings) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
+		if running, _ := mihomo.Running(s); !running {
+			return groupsMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+		}
 		groups, err := api.New(controller, secret).Groups()
+		if errors.Is(err, api.ErrUnauthorized) {
+			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+		}
 		return groupsMsg{groups: groups, err: err}
 	}
 }
@@ -150,7 +159,14 @@ func loadGroupsCmd(s *config.Settings) tea.Cmd {
 func selectNodeCmd(s *config.Settings, group, node string) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
-		if err := api.New(controller, secret).SelectNode(group, node); err != nil {
+		if running, _ := mihomo.Running(s); !running {
+			return actionMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+		}
+		err := api.New(controller, secret).SelectNode(group, node)
+		if errors.Is(err, api.ErrUnauthorized) {
+			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+		}
+		if err != nil {
 			return actionMsg{err: err}
 		}
 		return actionMsg{note: group + " → " + node}

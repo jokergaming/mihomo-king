@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"mihomo-king/internal/config"
 )
 
 func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -56,6 +59,10 @@ func (m Model) updateAddForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.urlInput.Focus()
 			}
 			name := strings.TrimSpace(m.nameInput.Value())
+			if err := config.ValidateSubName(name); err != nil {
+				m.setErr(err.Error())
+				return m, nil
+			}
 			rawURL := strings.TrimSpace(m.urlInput.Value())
 			if rawURL == "" {
 				m.setErr("url required")
@@ -85,6 +92,10 @@ func (m Model) updateSelectedSub() (tea.Model, tea.Cmd) {
 	if sub == nil {
 		return m, nil
 	}
+	if err := config.ValidateSubName(sub.Name); err != nil {
+		m.setErr(err.Error())
+		return m, nil
+	}
 	m.setStatus("updating " + sub.Name + "…")
 	return m, downloadCmd(sub.Name, sub.URL, m.settings.SubPath(sub.Name))
 }
@@ -94,8 +105,11 @@ func (m Model) deleteSelectedSub() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if err := os.Remove(m.settings.SubPath(sel.id)); err != nil && !os.IsNotExist(err) {
+		m.setErr(fmt.Sprintf("delete %s: %v", sel.id, err))
+		return m, nil
+	}
 	m.settings.RemoveSub(sel.id)
-	_ = os.Remove(m.settings.SubPath(sel.id))
 	if err := m.settings.Save(); err != nil {
 		m.setErr(err.Error())
 	} else {

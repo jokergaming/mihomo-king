@@ -25,7 +25,7 @@ func (s *Settings) MergeConfig(subYAML []byte) ([]byte, error) {
 	root["allow-lan"] = true
 	root["mode"] = s.Mode
 	root["log-level"] = s.LogLevel
-	root["tun"] = tunBlock(s.TunEnable)
+	root["tun"] = tunBlock(s.TunEnable, s.TunDevice)
 
 	out, err := yaml.Marshal(root)
 	if err != nil {
@@ -56,9 +56,10 @@ func (s *Settings) WriteActiveFromStore() error {
 	return s.WriteActiveConfig(body)
 }
 
-func tunBlock(enable bool) map[string]any {
+func tunBlock(enable bool, device string) map[string]any {
 	return map[string]any{
 		"enable":                enable,
+		"device":                device,
 		"stack":                 "system",
 		"auto-route":            true,
 		"auto-detect-interface": true,

@@ -4,6 +4,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,9 @@ import (
 	"strings"
 	"time"
 )
+
+// ErrUnauthorized means the controller rejected the configured secret.
+var ErrUnauthorized = errors.New("controller unauthorized")
 
 // Client talks to a mihomo external-controller.
 type Client struct {
@@ -158,6 +162,12 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 func statusErr(path string, resp *http.Response) error {
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<12))
 	detail := strings.TrimSpace(string(msg))
+	if resp.StatusCode == http.StatusUnauthorized {
+		if detail != "" {
+			return fmt.Errorf("%w: %s: %s", ErrUnauthorized, path, detail)
+		}
+		return fmt.Errorf("%w: %s", ErrUnauthorized, path)
+	}
 	if detail != "" {
 		return fmt.Errorf("%s: %s: %s", path, resp.Status, detail)
 	}

@@ -3,12 +3,18 @@
 package mihomo
 
 import (
+	"errors"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"mihomo-king/internal/config"
 )
@@ -16,7 +22,11 @@ import (
 // Running reports whether the tracked mihomo process is alive, with its PID.
 func Running(s *config.Settings) (bool, int) {
 	pid, err := readPID(s.PidFile())
-	if err != nil || !alive(pid) {
+	if err != nil {
+		return false, 0
+	}
+	if !alive(pid) || !matchesBinary(pid, s.MihomoBin) {
+		_ = os.Remove(s.PidFile())
 		return false, 0
 	}
 	return true, pid
@@ -30,6 +40,11 @@ func Start(s *config.Settings) error {
 	}
 	if err := checkBinary(s.MihomoBin); err != nil {
 		return err
+	}
+	// Our mihomo isn't running, so a taken controller port means another
+	// clash/mihomo instance owns it — starting would silently collide with it.
+	if controllerPortBusy(s.Controller) {
+		return fmt.Errorf("controller %s is already in use by another process (another clash/mihomo?); change controller in settings.yaml", s.Controller)
 	}
 	if err := s.WriteActiveFromStore(); err != nil {
 		return fmt.Errorf("write config: %w", err)
@@ -50,7 +65,15 @@ func Start(s *config.Settings) error {
 	}
 	pid := cmd.Process.Pid
 	_ = cmd.Process.Release()
-	return os.WriteFile(s.PidFile(), []byte(strconv.Itoa(pid)), 0o644)
+	if err := os.WriteFile(s.PidFile(), []byte(strconv.Itoa(pid)), 0o644); err != nil {
+		return err
+	}
+	if err := waitController(s.Controller, s.Secret, 5*time.Second); err != nil {
+		_ = syscall.Kill(-pid, syscall.SIGTERM)
+		_ = os.Remove(s.PidFile())
+		return fmt.Errorf("mihomo controller was not ready: %w; see %s", err, s.LogFile())
+	}
+	return nil
 }
 
 // Stop terminates the tracked mihomo process group.
@@ -61,8 +84,15 @@ func Stop(s *config.Settings) error {
 	}
 	// Negative pid signals the whole process group (we started it with Setpgid).
 	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
+			return os.Remove(s.PidFile())
+		}
 		if proc, e := os.FindProcess(pid); e == nil {
-			_ = proc.Signal(syscall.SIGTERM)
+			if sigErr := proc.Signal(syscall.SIGTERM); sigErr != nil && !errors.Is(sigErr, syscall.ESRCH) {
+				return sigErr
+			}
+		} else {
+			return err
 		}
 	}
 	return os.Remove(s.PidFile())
@@ -78,7 +108,40 @@ func MissingTunCaps(s *config.Settings) bool {
 	if err != nil {
 		return false // getcap unavailable or path odd; don't cry wolf
 	}
-	return !strings.Contains(string(out), "cap_net_admin")
+	caps := string(out)
+	return !strings.Contains(caps, "cap_net_admin") || !strings.Contains(caps, "cap_net_raw")
+}
+
+// ForeignTunDevices lists TUN interfaces that are up but aren't ours (e.g.
+// another clash instance's "Meta"). Two TUNs fight over routes/DNS, so the
+// dashboard warns before our TUN is enabled alongside one. Best-effort via
+// sysfs; empty when unsure.
+func ForeignTunDevices(own string) []string {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return nil
+	}
+	var tuns []string
+	for _, e := range entries {
+		name := e.Name()
+		if name == own {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join("/sys/class/net", name, "tun_flags")); err == nil {
+			tuns = append(tuns, name)
+		}
+	}
+	return tuns
+}
+
+func controllerPortBusy(controller string) bool {
+	addr := strings.TrimPrefix(strings.TrimPrefix(controller, "https://"), "http://")
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return true
+	}
+	_ = ln.Close()
+	return false
 }
 
 func checkBinary(bin string) error {
@@ -107,5 +170,72 @@ func alive(pid int) bool {
 	if err != nil {
 		return false
 	}
-	return proc.Signal(syscall.Signal(0)) == nil
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+func matchesBinary(pid int, bin string) bool {
+	exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return true // best effort outside Linux/procfs permission edge cases
+	}
+	want := bin
+	if resolved, err := exec.LookPath(bin); err == nil {
+		want = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(want); err == nil {
+		want = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return exe == want
+}
+
+func waitController(controller, secret string, timeout time.Duration) error {
+	base, err := controllerURL(controller)
+	if err != nil {
+		return err
+	}
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		req, err := http.NewRequest(http.MethodGet, base+"/version", nil)
+		if err != nil {
+			return err
+		}
+		if secret != "" {
+			req.Header.Set("Authorization", "Bearer "+secret)
+		}
+		resp, err := client.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+			if resp.StatusCode == http.StatusUnauthorized {
+				return fmt.Errorf("controller rejected configured secret")
+			}
+			lastErr = fmt.Errorf("controller returned %s", resp.Status)
+		} else {
+			lastErr = err
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("controller %s not reachable", base)
+}
+
+func controllerURL(controller string) (string, error) {
+	if strings.HasPrefix(controller, "http://") || strings.HasPrefix(controller, "https://") {
+		u, err := url.Parse(controller)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimRight(u.String(), "/"), nil
+	}
+	return "http://" + strings.TrimRight(controller, "/"), nil
 }

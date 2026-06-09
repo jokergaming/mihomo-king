@@ -82,5 +82,10 @@ func (m Model) viewDashboard() string {
 		b.WriteString("\n" + warnStyle.Render(
 			"⚠ TUN is on but mihomo lacks net caps. Run:\n  sudo setcap cap_net_admin,cap_net_raw=ep "+m.settings.MihomoBin))
 	}
+	if len(m.foreignTun) > 0 {
+		b.WriteString("\n" + warnStyle.Render(fmt.Sprintf(
+			"⚠ TUN is on but another TUN device is already up: %s\n  Two TUNs fight over routes/DNS — disable the other one (e.g. in its GUI) first.",
+			strings.Join(m.foreignTun, ", "))))
+	}
 	return b.String()
 }

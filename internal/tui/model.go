@@ -32,12 +32,13 @@ type Model struct {
 	statusErr bool
 
 	// dashboard (live state)
-	running  bool
-	pid      int
-	version  string
-	liveMode string
-	liveTun  bool
-	capWarn  bool
+	running    bool
+	pid        int
+	version    string
+	liveMode   string
+	liveTun    bool
+	capWarn    bool
+	foreignTun []string
 
 	// subscriptions
 	subs      list.Model
@@ -108,6 +109,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusMsg:
 		m.running, m.pid, m.version = msg.running, msg.pid, msg.version
 		m.liveMode, m.liveTun, m.capWarn = msg.mode, msg.tun, msg.capWarn
+		m.foreignTun = msg.foreignTun
 		return m, nil
 
 	case tickMsg:

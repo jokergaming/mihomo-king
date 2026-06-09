@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -32,6 +34,7 @@ type Settings struct {
 	Mode          string         `yaml:"mode"`
 	LogLevel      string         `yaml:"log_level"`
 	TunEnable     bool           `yaml:"tun_enable"`
+	TunDevice     string         `yaml:"tun_device"`
 	Active        string         `yaml:"active"` // active subscription name
 	Subscriptions []Subscription `yaml:"subscriptions"`
 
@@ -126,11 +129,33 @@ func (s *Settings) ActiveYAML() ([]byte, error) {
 	return os.ReadFile(s.SubPath(s.Active))
 }
 
+// ValidateSubName rejects names that would escape the subscriptions directory
+// or create awkward hidden/control-character filenames.
+func ValidateSubName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name required")
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("subscription name cannot be %q", name)
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("subscription name cannot contain path separators")
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("subscription name cannot contain control characters")
+		}
+	}
+	return nil
+}
+
 func defaults() *Settings {
 	return &Settings{
 		MihomoBin:  findMihomoBin(),
 		MihomoDir:  defaultMihomoDir(),
-		Controller: "127.0.0.1:9090",
+		Controller: "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
+		TunDevice:  "mihomo-king",    // not the default "Meta": avoid colliding with another instance's tun
 		MixedPort:  7890,
 		Mode:       "rule",
 		LogLevel:   "info",
@@ -145,7 +170,10 @@ func (s *Settings) applyDefaults() {
 		s.MihomoDir = defaultMihomoDir()
 	}
 	if s.Controller == "" {
-		s.Controller = "127.0.0.1:9090"
+		s.Controller = "127.0.0.1:9091"
+	}
+	if s.TunDevice == "" {
+		s.TunDevice = "mihomo-king"
 	}
 	if s.MixedPort == 0 {
 		s.MixedPort = 7890
