@@ -1,10 +1,12 @@
 package mihomo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"mihomo-king/internal/config"
@@ -39,17 +41,28 @@ func Restart(s *config.Settings) error {
 }
 
 // runSudo runs a command via sudo, feeding the password on stdin (-S). The
-// password is never placed in argv and never appears in errors.
+// password is never placed in argv and never appears in errors. The child is
+// detached from the controlling terminal (Setsid) so no sudo variant
+// (sudo, sudo-rs, run0+polkit) can open /dev/tty and paint a password prompt
+// over the TUI — without a tty they must use the stdin password or fail.
 func runSudo(password string, args ...string) error {
-	cmd := exec.Command("sudo", append([]string{"-S", "-p", "", "--"}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sudo", append([]string{"-S", "-p", "", "--"}, args...)...)
 	cmd.Stdin = strings.NewReader(password + "\n")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		detail := strings.TrimSpace(string(out))
-		if strings.Contains(detail, "incorrect password") || strings.Contains(detail, "no password was provided") {
+		switch {
+		case ctx.Err() != nil:
+			return errors.New("sudo timed out (no tty available for a password prompt — is this sudo variant ignoring -S?)")
+		case strings.Contains(detail, "account is locked") || strings.Contains(detail, "locked due to"):
+			return errors.New("sudo: account locked by failed attempts (pam_faillock) — wait for the unlock window, then retry")
+		case strings.Contains(detail, "incorrect password") || strings.Contains(detail, "no password was provided") ||
+			strings.Contains(detail, "Authentication failure"):
 			return errors.New("sudo: incorrect password")
-		}
-		if detail == "" {
+		case detail == "":
 			detail = err.Error()
 		}
 		return fmt.Errorf("sudo %s: %s", args[0], detail)

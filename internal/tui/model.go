@@ -117,6 +117,18 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		// Handled before any modal/filter so they always work.
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "ctrl+z":
+			return m, tea.Suspend
+		}
+
+	case tea.ResumeMsg: // back from ctrl+z: state may be stale
+		return m, refreshStatusCmd(m.settings)
+
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		bodyH := msg.Height - 8
@@ -184,7 +196,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // globalKey handles keys common to every screen (quit, screen switching).
 func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 	switch k {
-	case "ctrl+c", "q":
+	case "q":
 		return m, tea.Quit, true
 	case "tab":
 		nm, cmd := m.switchScreen((m.screen + 1) % 3)
