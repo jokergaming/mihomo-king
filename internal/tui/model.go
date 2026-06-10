@@ -86,7 +86,7 @@ func newList(title string) list.Model {
 	l.Title = title
 	l.SetShowHelp(false)
 	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
+	l.SetFilteringEnabled(true)
 	return l
 }
 
@@ -165,18 +165,37 @@ func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 	switch k {
 	case "ctrl+c", "q":
 		return m, tea.Quit, true
+	case "tab":
+		nm, cmd := m.switchScreen((m.screen + 1) % 3)
+		return nm, cmd, true
+	case "shift+tab":
+		nm, cmd := m.switchScreen((m.screen + 2) % 3)
+		return nm, cmd, true
 	case "1":
-		m.screen = screenDashboard
-		return m, refreshStatusCmd(m.settings), true
+		nm, cmd := m.switchScreen(screenDashboard)
+		return nm, cmd, true
 	case "2":
-		m.screen = screenSubs
-		m.reloadSubs()
-		return m, nil, true
+		nm, cmd := m.switchScreen(screenSubs)
+		return nm, cmd, true
 	case "3":
-		m.screen = screenNodes
-		return m, loadGroupsCmd(m.settings), true
+		nm, cmd := m.switchScreen(screenNodes)
+		return nm, cmd, true
 	}
 	return m, nil, false
+}
+
+// switchScreen activates a screen and kicks off its data refresh.
+func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
+	m.screen = s
+	switch s {
+	case screenSubs:
+		m.reloadSubs()
+		return m, nil
+	case screenNodes:
+		return m, loadGroupsCmd(m.settings)
+	default:
+		return m, refreshStatusCmd(m.settings)
+	}
 }
 
 func (m Model) View() string {
@@ -227,12 +246,31 @@ func (m Model) help() string {
 		if m.adding {
 			return "enter confirm · esc cancel"
 		}
-		return "a add · u update · enter activate · d delete · 1/2/3 switch · q quit"
+		if m.subs.FilterState() == list.Filtering {
+			return "type to filter · enter apply · esc cancel"
+		}
+		return "a add · u update · enter activate · d delete · / filter · tab/1/2/3 switch · q quit"
 	case screenNodes:
-		return "enter open/select · esc back · r reload · 1/2/3 switch · q quit"
+		if m.nodes.FilterState() == list.Filtering {
+			return "type to filter · enter apply · esc cancel"
+		}
+		return "enter open/select · esc back · r reload · / filter · tab/1/2/3 switch · q quit"
 	default:
-		return "s start · x stop · t toggle tun · r refresh · 2 subs · 3 nodes · q quit"
+		return "s start · x stop · t toggle tun · r refresh · tab/2/3 switch · q quit"
 	}
+}
+
+// filterOwnsKey reports whether the list's filter should consume this key:
+// while typing a filter every key belongs to the list; once a filter is
+// applied, esc clears it before any other esc behavior runs.
+func filterOwnsKey(l list.Model, key string) bool {
+	switch l.FilterState() {
+	case list.Filtering:
+		return true
+	case list.FilterApplied:
+		return key == "esc"
+	}
+	return false
 }
 
 func (m *Model) reloadSubs() {

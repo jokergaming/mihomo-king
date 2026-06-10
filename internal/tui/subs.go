@@ -15,6 +15,11 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddForm(msg)
 	}
 	if k, ok := msg.(tea.KeyMsg); ok {
+		if filterOwnsKey(m.subs, k.String()) {
+			var cmd tea.Cmd
+			m.subs, cmd = m.subs.Update(msg)
+			return m, cmd
+		}
 		switch k.String() {
 		case "a":
 			m.adding = true

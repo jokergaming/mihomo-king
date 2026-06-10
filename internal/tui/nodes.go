@@ -11,6 +11,11 @@ import (
 
 func (m Model) updateNodes(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if k, ok := msg.(tea.KeyMsg); ok {
+		if filterOwnsKey(m.nodes, k.String()) {
+			var cmd tea.Cmd
+			m.nodes, cmd = m.nodes.Update(msg)
+			return m, cmd
+		}
 		switch k.String() {
 		case "esc":
 			if m.curGroup != "" {
@@ -67,6 +72,7 @@ func (m *Model) findGroup(name string) *api.Group {
 }
 
 func (m *Model) showGroups() {
+	m.nodes.ResetFilter() // stale filter from the previous view would hide items
 	items := make([]list.Item, 0, len(m.groups))
 	for _, g := range m.groups {
 		auto := ""
@@ -89,6 +95,7 @@ func (m *Model) showMembers(group string) {
 	if g == nil {
 		return
 	}
+	m.nodes.ResetFilter() // stale filter from the previous view would hide items
 	items := make([]list.Item, 0, len(g.All))
 	for _, name := range g.All {
 		title := name
