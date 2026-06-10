@@ -27,6 +27,19 @@ func (s *Settings) MergeConfig(subYAML []byte) ([]byte, error) {
 	root["log-level"] = s.LogLevel
 	root["tun"] = tunBlock(s.TunEnable, s.TunDevice)
 
+	// The subscription often carries its own listeners (the provider generates
+	// them for a standalone setup). We expose mixed-port only; anything else
+	// would bind ports we don't own — possibly colliding with another clash
+	// instance generated from the same subscription.
+	for _, k := range []string{"port", "socks-port", "redir-port", "tproxy-port", "external-ui"} {
+		delete(root, k)
+	}
+	if dns, ok := root["dns"].(map[string]any); ok {
+		// Keep resolver settings; drop the public DNS listener (TUN's dns-hijack
+		// uses the internal resolver and needs no listen address).
+		delete(dns, "listen")
+	}
+
 	out, err := yaml.Marshal(root)
 	if err != nil {
 		return nil, err

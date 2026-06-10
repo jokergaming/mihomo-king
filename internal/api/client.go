@@ -44,9 +44,10 @@ type Proxy struct {
 	All  []string `json:"all"`
 }
 
-// Group is a user-selectable proxy group.
+// Group is a proxy group from the runtime (Selector, URLTest, Fallback…).
 type Group struct {
 	Name string
+	Type string
 	Now  string
 	All  []string
 }
@@ -80,7 +81,10 @@ func (c *Client) Configs() (*Configs, error) {
 	return &cfg, nil
 }
 
-// Groups returns the selectable (Selector) groups, sorted by name.
+// Groups returns all proxy groups in the runtime, in config order (mihomo's
+// GLOBAL meta-group lists them in the order they were defined). GLOBAL itself
+// is omitted. Only Selector groups accept a node switch; others (URLTest,
+// Fallback…) pick automatically but are still useful to inspect.
 func (c *Client) Groups() ([]Group, error) {
 	var resp struct {
 		Proxies map[string]Proxy `json:"proxies"`
@@ -88,13 +92,30 @@ func (c *Client) Groups() ([]Group, error) {
 	if err := c.get("/proxies", &resp); err != nil {
 		return nil, err
 	}
-	var groups []Group
-	for name, p := range resp.Proxies {
-		if p.Type == "Selector" {
-			groups = append(groups, Group{Name: name, Now: p.Now, All: p.All})
+	order := map[string]int{}
+	if g, ok := resp.Proxies["GLOBAL"]; ok {
+		for i, name := range g.All {
+			order[name] = i
 		}
 	}
-	sort.Slice(groups, func(i, j int) bool { return groups[i].Name < groups[j].Name })
+	var groups []Group
+	for name, p := range resp.Proxies {
+		if name == "GLOBAL" || len(p.All) == 0 {
+			continue
+		}
+		groups = append(groups, Group{Name: name, Type: p.Type, Now: p.Now, All: p.All})
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		oi, iok := order[groups[i].Name]
+		oj, jok := order[groups[j].Name]
+		if iok && jok {
+			return oi < oj
+		}
+		if iok != jok {
+			return iok
+		}
+		return groups[i].Name < groups[j].Name
+	})
 	return groups, nil
 }
 

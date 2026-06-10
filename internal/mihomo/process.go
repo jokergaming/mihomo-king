@@ -41,6 +41,11 @@ func Start(s *config.Settings) error {
 	if err := checkBinary(s.MihomoBin); err != nil {
 		return err
 	}
+	// An empty active config (no proxies/groups) is never what the user wants;
+	// it leaves the runtime with only built-in GLOBAL/DIRECT.
+	if s.Active == "" {
+		return fmt.Errorf("no active subscription — press 2, pick one, press enter to activate, then start")
+	}
 	// Our mihomo isn't running, so a taken controller port means another
 	// clash/mihomo instance owns it — starting would silently collide with it.
 	if controllerPortBusy(s.Controller) {

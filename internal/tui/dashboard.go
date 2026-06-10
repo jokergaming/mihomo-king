@@ -73,7 +73,7 @@ func (m Model) viewDashboard() string {
 
 	active := m.settings.Active
 	if active == "" {
-		active = dimStyle.Render("(none — press 2 to add one)")
+		active = dimStyle.Render("(none — press 2, pick one, press enter to activate)")
 	}
 	row("subscription", active)
 	row("controller", m.settings.Controller)

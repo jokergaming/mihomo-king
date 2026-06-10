@@ -45,6 +45,10 @@ func (m Model) nodesEnter() (tea.Model, tea.Cmd) {
 		m.showMembers(sel.id)
 		return m, nil
 	}
+	if g := m.findGroup(m.curGroup); g != nil && g.Type != "Selector" {
+		m.setErr(fmt.Sprintf("%s picks nodes automatically (%s); only select-type groups are switchable", m.curGroup, g.Type))
+		return m, nil
+	}
 	m.setStatus("switching…")
 	// select, then reload groups to reflect the new selection
 	return m, tea.Sequence(
@@ -53,28 +57,35 @@ func (m Model) nodesEnter() (tea.Model, tea.Cmd) {
 	)
 }
 
+func (m *Model) findGroup(name string) *api.Group {
+	for i := range m.groups {
+		if m.groups[i].Name == name {
+			return &m.groups[i]
+		}
+	}
+	return nil
+}
+
 func (m *Model) showGroups() {
 	items := make([]list.Item, 0, len(m.groups))
 	for _, g := range m.groups {
+		auto := ""
+		if g.Type != "Selector" {
+			auto = "  ·  auto"
+		}
 		items = append(items, item{
 			title: g.Name,
-			desc:  fmt.Sprintf("now: %s  ·  %d nodes", g.Now, len(g.All)),
+			desc:  fmt.Sprintf("%s%s  ·  now: %s  ·  %d nodes", g.Type, auto, g.Now, len(g.All)),
 			id:    g.Name,
 		})
 	}
-	m.nodes.Title = "Proxy groups"
+	m.nodes.Title = fmt.Sprintf("Proxy groups (%d)", len(m.groups))
 	m.nodes.SetItems(items)
 	m.nodes.ResetSelected()
 }
 
 func (m *Model) showMembers(group string) {
-	var g *api.Group
-	for i := range m.groups {
-		if m.groups[i].Name == group {
-			g = &m.groups[i]
-			break
-		}
-	}
+	g := m.findGroup(group)
 	if g == nil {
 		return
 	}
@@ -87,6 +98,9 @@ func (m *Model) showMembers(group string) {
 		items = append(items, item{title: title, id: name})
 	}
 	m.nodes.Title = group
+	if g.Type != "Selector" {
+		m.nodes.Title = fmt.Sprintf("%s (%s — picks automatically)", group, g.Type)
+	}
 	m.nodes.SetItems(items)
 	m.nodes.ResetSelected()
 }

@@ -67,3 +67,46 @@ func TestMergeConfigEmptySubscriptionStillValid(t *testing.T) {
 		t.Errorf("tun block missing")
 	}
 }
+
+func TestMergeConfigStripsForeignListeners(t *testing.T) {
+	// Providers generate standalone configs with their own listeners; passing
+	// them through would bind ports owned by a coexisting clash instance.
+	sub := []byte(`
+port: 6152
+socks-port: 6153
+mixed-port: 8899
+external-ui: ui
+dns:
+  enable: true
+  listen: 0.0.0.0:1053
+  nameserver: [8.8.8.8]
+proxies: []
+`)
+	s := &Settings{Controller: "127.0.0.1:9091", Secret: "x", MixedPort: 7890, Mode: "rule", LogLevel: "info"}
+	out, err := s.MergeConfig(sub)
+	if err != nil {
+		t.Fatalf("MergeConfig: %v", err)
+	}
+	var got map[string]any
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("not valid yaml: %v", err)
+	}
+	for _, k := range []string{"port", "socks-port", "redir-port", "tproxy-port", "external-ui"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("%s leaked through from subscription", k)
+		}
+	}
+	if got["mixed-port"] != 7890 {
+		t.Errorf("mixed-port = %v, want 7890", got["mixed-port"])
+	}
+	dns, ok := got["dns"].(map[string]any)
+	if !ok {
+		t.Fatalf("dns block lost: %v", got["dns"])
+	}
+	if _, ok := dns["listen"]; ok {
+		t.Errorf("dns.listen leaked through from subscription")
+	}
+	if dns["enable"] != true {
+		t.Errorf("dns.enable not preserved")
+	}
+}
