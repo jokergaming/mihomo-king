@@ -19,9 +19,10 @@ var ErrUnauthorized = errors.New("controller unauthorized")
 
 // Client talks to a mihomo external-controller.
 type Client struct {
-	base   string
-	secret string
-	http   *http.Client
+	base     string
+	secret   string
+	http     *http.Client // reads + light mutations
+	httpSlow *http.Client // config mutations: tun toggle / reload rebuild listeners and fetch providers
 }
 
 // New builds a client for controller (host:port or full URL) and bearer secret.
@@ -31,10 +32,17 @@ func New(controller, secret string) *Client {
 		base = "http://" + base
 	}
 	return &Client{
-		base:   strings.TrimRight(base, "/"),
-		secret: secret,
-		http:   &http.Client{Timeout: 10 * time.Second},
+		base:     strings.TrimRight(base, "/"),
+		secret:   secret,
+		http:     &http.Client{Timeout: 10 * time.Second},
+		httpSlow: &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+// SetTimeouts overrides the read and mutation timeouts (used by tests).
+func (c *Client) SetTimeouts(read, mutate time.Duration) {
+	c.http.Timeout = read
+	c.httpSlow.Timeout = mutate
 }
 
 // Proxy is a single proxy or group entry from GET /proxies.
@@ -124,18 +132,35 @@ func (c *Client) SelectNode(group, node string) error {
 	return c.send(http.MethodPut, "/proxies/"+url.PathEscape(group), map[string]string{"name": node})
 }
 
-// SetTun toggles TUN live without a restart (PATCH /configs).
+// SetTun toggles TUN live without a restart (PATCH /configs). Applying it can
+// take a while (device + route setup tears down listeners), so this uses the
+// slow client — and if the request still errors, the runtime state is checked
+// before reporting: a timed-out patch has usually been applied anyway.
 func (c *Client) SetTun(enable bool) error {
-	return c.send(http.MethodPatch, "/configs", map[string]any{"tun": map[string]any{"enable": enable}})
+	err := c.sendSlow(http.MethodPatch, "/configs", map[string]any{"tun": map[string]any{"enable": enable}})
+	if err == nil {
+		return nil
+	}
+	for i := 0; i < 5; i++ {
+		time.Sleep(time.Second)
+		if cfg, e := c.Configs(); e == nil {
+			if cfg.Tun.Enable == enable {
+				return nil
+			}
+			break // controller is back and disagrees: the patch really failed
+		}
+	}
+	return err
 }
 
 // ReloadConfig reloads mihomo from a config file path (PUT /configs?force=true).
+// force=true also re-fetches providers over the network, so allow it time.
 func (c *Client) ReloadConfig(path string) error {
-	return c.send(http.MethodPut, "/configs?force=true", map[string]string{"path": path})
+	return c.sendSlow(http.MethodPut, "/configs?force=true", map[string]string{"path": path})
 }
 
 func (c *Client) get(path string, out any) error {
-	resp, err := c.do(http.MethodGet, path, nil)
+	resp, err := c.do(c.http, http.MethodGet, path, nil)
 	if err != nil {
 		return err
 	}
@@ -147,7 +172,15 @@ func (c *Client) get(path string, out any) error {
 }
 
 func (c *Client) send(method, path string, body any) error {
-	resp, err := c.do(method, path, body)
+	return c.sendWith(c.http, method, path, body)
+}
+
+func (c *Client) sendSlow(method, path string, body any) error {
+	return c.sendWith(c.httpSlow, method, path, body)
+}
+
+func (c *Client) sendWith(h *http.Client, method, path string, body any) error {
+	resp, err := c.do(h, method, path, body)
 	if err != nil {
 		return err
 	}
@@ -158,7 +191,7 @@ func (c *Client) send(method, path string, body any) error {
 	return nil
 }
 
-func (c *Client) do(method, path string, body any) (*http.Response, error) {
+func (c *Client) do(h *http.Client, method, path string, body any) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		buf, err := json.Marshal(body)
@@ -177,7 +210,7 @@ func (c *Client) do(method, path string, body any) (*http.Response, error) {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	return c.http.Do(req)
+	return h.Do(req)
 }
 
 func statusErr(path string, resp *http.Response) error {
