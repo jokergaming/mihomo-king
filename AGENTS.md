@@ -63,8 +63,12 @@ is named `Meta` (mihomo's default). mihomo-king must never collide with it, so:
 
 - defaults are `controller: 127.0.0.1:9091` and `tun_device: mihomo-king` (settings.yaml);
 - `mihomo.Start` refuses to launch when the controller port is already in use by a foreign process;
-- the dashboard warns when our TUN is enabled while a foreign TUN device is up
-  (two TUNs fight over routes/DNS) — detected via `/sys/class/net/*/tun_flags`.
+- enabling TUN while a foreign TUN device is up (detected via `/sys/class/net/*/tun_flags`)
+  opens a dashboard modal: shut the foreign device down via sudo `ip link delete`, enable
+  anyway, or cancel. Privileged steps (delete, `setcap`) take the sudo password through a
+  masked in-TUI prompt (`internal/mihomo/sudo.go`; password lives only in the command
+  closure, fed to `sudo -S` stdin, never logged). After `setcap`, mihomo is restarted —
+  caps are read at exec time.
 
 ### mihomo RESTful API reference (base = configured controller, default `http://127.0.0.1:9091`, `Authorization: Bearer <secret>`)
 

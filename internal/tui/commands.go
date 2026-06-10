@@ -108,6 +108,49 @@ func toggleTunCmd(s *config.Settings) tea.Cmd {
 	}
 }
 
+// enableTunCmd performs the privileged part of enabling TUN (shutting down a
+// foreign TUN device, granting net caps), then enables it. The password stays
+// in this closure and is never persisted or logged.
+func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd {
+	controller, secret := s.Controller, s.Secret
+	return func() tea.Msg {
+		for _, dev := range delDevs {
+			if err := mihomo.DeleteTunDevice(password, dev); err != nil {
+				return actionMsg{err: fmt.Errorf("shut down %s: %v", dev, err)}
+			}
+		}
+		needRestart := false
+		if mihomo.MissingTunCaps(s) {
+			if password == "" {
+				return actionMsg{err: fmt.Errorf("mihomo lacks net caps; press t again to enter the sudo password")}
+			}
+			if err := mihomo.GrantNetCaps(password, s.MihomoBin); err != nil {
+				return actionMsg{err: err}
+			}
+			needRestart = true // caps are read at exec time; the running process doesn't gain them
+		}
+		s.TunEnable = true
+		if err := s.Save(); err != nil {
+			return actionMsg{err: err}
+		}
+		if err := s.WriteActiveFromStore(); err != nil {
+			return actionMsg{err: err}
+		}
+		running, _ := mihomo.Running(s)
+		switch {
+		case running && needRestart:
+			if err := mihomo.Restart(s); err != nil {
+				return actionMsg{err: fmt.Errorf("restart after setcap: %v", err)}
+			}
+		case running:
+			if err := api.New(controller, secret).SetTun(true); err != nil {
+				return actionMsg{err: fmt.Errorf("tun live toggle: %w", err)}
+			}
+		}
+		return actionMsg{note: "TUN on"}
+	}
+}
+
 // switchSubCmd assumes s.Active has already been set and saved.
 func switchSubCmd(s *config.Settings) tea.Cmd {
 	controller, secret, active := s.Controller, s.Secret, s.Active

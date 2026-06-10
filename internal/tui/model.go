@@ -22,6 +22,15 @@ const (
 	screenNodes
 )
 
+// tunStage is the dashboard's modal flow for enabling TUN.
+type tunStage int
+
+const (
+	tunIdle        tunStage = iota
+	tunAskForeign           // another TUN is up: delete it / continue / cancel
+	tunAskPassword          // sudo password needed (delete foreign TUN or setcap)
+)
+
 // Model is the root Bubble Tea model.
 type Model struct {
 	settings  *config.Settings
@@ -39,6 +48,12 @@ type Model struct {
 	liveTun    bool
 	capWarn    bool
 	foreignTun []string
+
+	// tun enable flow (dashboard modal)
+	tunStage   tunStage
+	tunForeign []string // foreign TUN devices found when 't' was pressed
+	tunDelDevs []string // devices the user chose to shut down (needs sudo)
+	pwInput    textinput.Model
 
 	// subscriptions
 	subs      list.Model
@@ -76,6 +91,12 @@ func New(s *config.Settings) Model {
 	m.urlInput = textinput.New()
 	m.urlInput.Placeholder = "https://example.com/sub.yaml"
 	m.urlInput.CharLimit = 2048
+
+	m.pwInput = textinput.New()
+	m.pwInput.Placeholder = "sudo password"
+	m.pwInput.EchoMode = textinput.EchoPassword
+	m.pwInput.EchoCharacter = '•'
+	m.pwInput.CharLimit = 128
 
 	m.reloadSubs()
 	return m
@@ -256,6 +277,12 @@ func (m Model) help() string {
 		}
 		return "enter open/select · esc back · r reload · / filter · tab/1/2/3 switch · q quit"
 	default:
+		switch m.tunStage {
+		case tunAskForeign:
+			return "d shut down other tun (sudo) · c enable anyway · esc cancel"
+		case tunAskPassword:
+			return "enter confirm · esc cancel"
+		}
 		return "s start · x stop · t toggle tun · r refresh · tab/2/3 switch · q quit"
 	}
 }

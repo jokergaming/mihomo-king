@@ -24,11 +24,15 @@ and talks to its RESTful API for live changes. It writes its own settings to
 
 ## TUN requires privileges
 
-Creating a TUN device needs `CAP_NET_ADMIN`/`CAP_NET_RAW`. Grant them once to the
-mihomo binary so a normal user can enable TUN:
+Creating a TUN device needs `CAP_NET_ADMIN`/`CAP_NET_RAW`. When you enable TUN in the
+dashboard, the tool handles privileges itself: if the mihomo binary lacks the caps it
+asks for your sudo password (masked, in-TUI) and runs `setcap` for you, restarting
+mihomo so the caps take effect. To grant them ahead of time instead:
 
 ```bash
 sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v mihomo)"
 ```
 
-The dashboard warns when TUN is on but the binary appears to lack these capabilities.
+If another TUN device is already up (e.g. a coexisting clash GUI), enabling TUN asks
+whether to shut the other device down (via sudo `ip link delete`), enable ours anyway
+(two TUNs fight over routes/DNS — not recommended), or cancel.
