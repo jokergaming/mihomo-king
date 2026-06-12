@@ -39,6 +39,7 @@ type Settings struct {
 	TestURL       string         `yaml:"test_url"`
 	TunEnable     bool           `yaml:"tun_enable"`
 	TunDevice     string         `yaml:"tun_device"`
+	TunAddress    string         `yaml:"tun_address"`
 	Active        string         `yaml:"active"` // active subscription name
 	Subscriptions []Subscription `yaml:"subscriptions"`
 
@@ -209,6 +210,7 @@ func defaults() *Settings {
 		SingBoxDir:  defaultSingBoxDir(),
 		Controller:  "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
 		TunDevice:   "mihomo-king",    // not the default "Meta": avoid colliding with another instance's tun
+		TunAddress:  "172.19.0.1/30",
 		MixedPort:   7890,
 		Mode:        "rule",
 		LogLevel:    "info",
@@ -240,6 +242,9 @@ func (s *Settings) applyDefaults() {
 	}
 	if s.TunDevice == "" {
 		s.TunDevice = "mihomo-king"
+	}
+	if s.TunAddress == "" {
+		s.TunAddress = "172.19.0.1/30"
 	}
 	if s.MixedPort == 0 {
 		s.MixedPort = 7890

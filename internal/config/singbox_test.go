@@ -25,6 +25,7 @@ rules:
 		LogLevel:    "info",
 		TunEnable:   true,
 		TunDevice:   "mihomo-king",
+		TunAddress:  "172.19.0.1/30",
 	}
 
 	cfg, err := s.SingBoxConfig(sub)
@@ -47,6 +48,9 @@ rules:
 	}
 	if inbounds[1]["type"] != "tun" || inbounds[1]["interface_name"] != "mihomo-king" {
 		t.Fatalf("tun inbound not injected: %#v", inbounds[1])
+	}
+	if got := inbounds[1]["address"]; !sameStrings(got, []string{"172.19.0.1/30"}) {
+		t.Fatalf("tun address = %#v, want 172.19.0.1/30", got)
 	}
 	if _, ok := inbounds[1]["auto_detect_interface"]; ok {
 		t.Fatalf("auto_detect_interface must not be written to tun inbound: %#v", inbounds[1])
@@ -157,6 +161,7 @@ func TestSingBoxConfigPassesInstalledChecker(t *testing.T) {
 		LogLevel:    "info",
 		TunEnable:   true,
 		TunDevice:   "mihomo-king-test",
+		TunAddress:  "172.19.0.1/30",
 	}
 	sub := []byte(`
 proxies:

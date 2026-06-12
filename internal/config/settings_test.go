@@ -45,6 +45,9 @@ func TestSettingsApplyDefaultsAddsToolFields(t *testing.T) {
 	if s.SingBoxDir == "" {
 		t.Fatalf("SingBoxDir was not defaulted")
 	}
+	if s.TunAddress != "172.19.0.1/30" {
+		t.Fatalf("TunAddress = %q, want default address", s.TunAddress)
+	}
 }
 
 func TestSettingsBinaryFollowsManagedTool(t *testing.T) {

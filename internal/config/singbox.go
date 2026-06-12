@@ -125,6 +125,7 @@ func singBoxInbounds(s *Settings) []map[string]any {
 			"type":           "tun",
 			"tag":            "tun-in",
 			"interface_name": s.TunDevice,
+			"address":        []string{s.TunAddress},
 			"stack":          "system",
 			"auto_route":     true,
 			"strict_route":   true,

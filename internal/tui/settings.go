@@ -22,6 +22,7 @@ const (
 	settingController = "controller"
 	settingMixedPort  = "mixed_port"
 	settingTunDevice  = "tun_device"
+	settingTunAddress = "tun_address"
 	settingTestURL    = "test_url"
 	settingMode       = "mode"
 	settingLogLevel   = "log_level"
@@ -135,6 +136,8 @@ func (m Model) settingValue(key string) string {
 		return strconv.Itoa(m.settings.MixedPort)
 	case settingTunDevice:
 		return m.settings.TunDevice
+	case settingTunAddress:
+		return m.settings.TunAddress
 	case settingTestURL:
 		return m.settings.TestURL
 	case settingMode:
@@ -169,6 +172,8 @@ func (m *Model) saveSettingValue(key, raw string) error {
 		m.settings.MixedPort = port
 	case settingTunDevice:
 		m.settings.TunDevice = raw
+	case settingTunAddress:
+		m.settings.TunAddress = raw
 	case settingTestURL:
 		if err := validateTestURL(raw); err != nil {
 			return err
@@ -198,6 +203,7 @@ func (m *Model) reloadSettings() {
 		item{title: "controller", desc: m.settings.Controller, id: settingController},
 		item{title: "mixed port", desc: strconv.Itoa(m.settings.MixedPort), id: settingMixedPort},
 		item{title: "tun device", desc: m.settings.TunDevice, id: settingTunDevice},
+		item{title: "tun address", desc: m.settings.TunAddress, id: settingTunAddress},
 		item{title: "test url", desc: m.settings.TestURL, id: settingTestURL},
 		item{title: "mode", desc: optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
 		item{title: "log level", desc: optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
