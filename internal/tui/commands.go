@@ -40,6 +40,13 @@ type actionMsg struct {
 	err  error
 }
 
+type delayMsg struct {
+	group  string
+	node   string
+	delays map[string]int
+	err    error
+}
+
 type tickMsg time.Time
 
 // --- commands ---
@@ -213,5 +220,39 @@ func selectNodeCmd(s *config.Settings, group, node string) tea.Cmd {
 			return actionMsg{err: err}
 		}
 		return actionMsg{note: group + " → " + node}
+	}
+}
+
+func testNodeCmd(s *config.Settings, group, node string) tea.Cmd {
+	controller, secret, testURL := s.Controller, s.Secret, s.TestURL
+	return func() tea.Msg {
+		if running, _ := mihomo.Running(s); !running {
+			return delayMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+		}
+		delay, err := api.New(controller, secret).Delay(node, testURL, 5000)
+		if errors.Is(err, api.ErrUnauthorized) {
+			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+		}
+		if err != nil {
+			return delayMsg{err: err}
+		}
+		return delayMsg{group: group, node: node, delays: map[string]int{node: delay}}
+	}
+}
+
+func testGroupCmd(s *config.Settings, group string) tea.Cmd {
+	controller, secret, testURL := s.Controller, s.Secret, s.TestURL
+	return func() tea.Msg {
+		if running, _ := mihomo.Running(s); !running {
+			return delayMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+		}
+		delays, err := api.New(controller, secret).GroupDelay(group, testURL, 5000)
+		if errors.Is(err, api.ErrUnauthorized) {
+			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+		}
+		if err != nil {
+			return delayMsg{err: err}
+		}
+		return delayMsg{group: group, delays: delays}
 	}
 }

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -38,6 +39,49 @@ func TestSetTunTimedOutButApplied(t *testing.T) {
 	c.SetTimeouts(2*time.Second, 50*time.Millisecond, 5*time.Second)
 	if err := c.SetTun(true); err != nil {
 		t.Fatalf("SetTun should succeed via state verification, got: %v", err)
+	}
+}
+
+func TestDelayEndpoints(t *testing.T) {
+	const testURL = "http://www.gstatic.com/generate_204"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Fatalf("Authorization = %q, want bearer secret", got)
+		}
+		if got := r.URL.Query().Get("url"); got != testURL {
+			t.Fatalf("url query = %q, want %q", got, testURL)
+		}
+		if got := r.URL.Query().Get("timeout"); got != "5000" {
+			t.Fatalf("timeout query = %q, want 5000", got)
+		}
+
+		switch r.URL.Path {
+		case "/proxies/HK 1/delay":
+			_ = json.NewEncoder(w).Encode(map[string]int{"delay": 123})
+		case "/group/Proxy/delay":
+			_ = json.NewEncoder(w).Encode(map[string]int{"HK 1": 123, "JP": 456})
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "secret")
+	delay, err := c.Delay("HK 1", testURL, 5000)
+	if err != nil {
+		t.Fatalf("Delay returned error: %v", err)
+	}
+	if delay != 123 {
+		t.Fatalf("Delay = %d, want 123", delay)
+	}
+
+	delays, err := c.GroupDelay("Proxy", testURL, 5000)
+	if err != nil {
+		t.Fatalf("GroupDelay returned error: %v", err)
+	}
+	if delays["HK 1"] != 123 || delays["JP"] != 456 {
+		t.Fatalf("GroupDelay = %#v, want HK 1=123 and JP=456", delays)
 	}
 }
 

@@ -33,6 +33,7 @@ type Settings struct {
 	MixedPort     int            `yaml:"mixed_port"`
 	Mode          string         `yaml:"mode"`
 	LogLevel      string         `yaml:"log_level"`
+	TestURL       string         `yaml:"test_url"`
 	TunEnable     bool           `yaml:"tun_enable"`
 	TunDevice     string         `yaml:"tun_device"`
 	Active        string         `yaml:"active"` // active subscription name
@@ -159,6 +160,7 @@ func defaults() *Settings {
 		MixedPort:  7890,
 		Mode:       "rule",
 		LogLevel:   "info",
+		TestURL:    "http://www.gstatic.com/generate_204",
 	}
 }
 
@@ -183,6 +185,9 @@ func (s *Settings) applyDefaults() {
 	}
 	if s.LogLevel == "" {
 		s.LogLevel = "info"
+	}
+	if s.TestURL == "" {
+		s.TestURL = "http://www.gstatic.com/generate_204"
 	}
 }
 

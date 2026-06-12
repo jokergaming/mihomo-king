@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -63,9 +64,12 @@ type Model struct {
 	urlInput  textinput.Model
 
 	// nodes
-	groups   []api.Group
-	nodes    list.Model
-	curGroup string // "" = group list shown; else members of this group
+	groups         []api.Group
+	nodes          list.Model
+	curGroup       string // "" = group list shown; else members of this group
+	nodeDelays     map[string]int
+	editingTestURL bool
+	testURLInput   textinput.Model
 }
 
 // item is a generic list row. id holds the underlying name (title may be decorated).
@@ -91,6 +95,9 @@ func New(s *config.Settings) Model {
 	m.urlInput = textinput.New()
 	m.urlInput.Placeholder = "https://example.com/sub.yaml"
 	m.urlInput.CharLimit = 2048
+	m.testURLInput = textinput.New()
+	m.testURLInput.Placeholder = "http://www.gstatic.com/generate_204"
+	m.testURLInput.CharLimit = 2048
 
 	m.pwInput = textinput.New()
 	m.pwInput.Placeholder = "sudo password"
@@ -181,6 +188,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.curGroup = ""
 		m.showGroups()
 		return m, nil
+
+	case delayMsg:
+		if msg.err != nil {
+			m.setErr("delay: " + msg.err.Error())
+			return m, nil
+		}
+		m.applyDelayMsg(msg)
+		if msg.node != "" {
+			m.setStatus(fmt.Sprintf("%s: %d ms", msg.node, msg.delays[msg.node]))
+		} else {
+			m.setStatus(fmt.Sprintf("tested %d nodes", len(msg.delays)))
+		}
+		return m, nil
 	}
 
 	switch m.screen {
@@ -239,7 +259,7 @@ func (m Model) View() string {
 	case screenSubs:
 		b.WriteString(m.viewSubs())
 	case screenNodes:
-		b.WriteString(m.nodes.View())
+		b.WriteString(m.viewNodes())
 	default:
 		b.WriteString(m.viewDashboard())
 	}
@@ -284,10 +304,13 @@ func (m Model) help() string {
 		}
 		return "a add · u update · enter activate · d delete · / filter · tab/1/2/3 switch · q quit"
 	case screenNodes:
+		if m.editingTestURL {
+			return "enter save url · esc cancel"
+		}
 		if m.nodes.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "enter open/select · esc back · r reload · / filter · tab/1/2/3 switch · q quit"
+		return "enter open/select · l test selected · a test group · u set url · esc back · r reload · / filter · tab/1/2/3 switch · q quit"
 	default:
 		switch m.tunStage {
 		case tunAskForeign:

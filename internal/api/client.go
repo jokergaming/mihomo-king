@@ -136,6 +136,28 @@ func (c *Client) SelectNode(group, node string) error {
 	return c.send(http.MethodPut, "/proxies/"+url.PathEscape(group), map[string]string{"name": node})
 }
 
+// Delay tests a single proxy/node and returns latency in milliseconds.
+func (c *Client) Delay(name, testURL string, timeoutMS int) (int, error) {
+	path := delayPath("/proxies/"+url.PathEscape(name)+"/delay", testURL, timeoutMS)
+	var resp struct {
+		Delay int `json:"delay"`
+	}
+	if err := c.get(path, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Delay, nil
+}
+
+// GroupDelay tests every member of a proxy group and returns latency by node.
+func (c *Client) GroupDelay(group, testURL string, timeoutMS int) (map[string]int, error) {
+	path := delayPath("/group/"+url.PathEscape(group)+"/delay", testURL, timeoutMS)
+	delays := map[string]int{}
+	if err := c.get(path, &delays); err != nil {
+		return nil, err
+	}
+	return delays, nil
+}
+
 // SetTun toggles TUN live without a restart (PATCH /configs). While applying
 // the patch mihomo rebuilds listeners and routes, which can stall — or kill —
 // the very connection awaiting the response, so a request error proves
@@ -195,6 +217,13 @@ func (c *Client) sendWith(h *http.Client, method, path string, body any) error {
 		return statusErr(path, resp)
 	}
 	return nil
+}
+
+func delayPath(path, testURL string, timeoutMS int) string {
+	q := url.Values{}
+	q.Set("url", testURL)
+	q.Set("timeout", fmt.Sprintf("%d", timeoutMS))
+	return path + "?" + q.Encode()
 }
 
 func (c *Client) do(h *http.Client, method, path string, body any) (*http.Response, error) {
