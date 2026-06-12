@@ -17,6 +17,23 @@ go build -o mihomo-king .
 ./mihomo-king
 ```
 
+## Release
+
+GitHub Actions publishes release binaries for Linux and macOS on amd64 and arm64.
+Create and push a version tag to publish a release:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release uploads `tar.gz` archives and SHA-256 checksum files for:
+
+- `linux-amd64`
+- `linux-arm64`
+- `darwin-amd64`
+- `darwin-arm64`
+
 The tool manages mihomo as a background subprocess (start/stop from the dashboard)
 and talks to its RESTful API for live changes. It writes its own settings to
 `${XDG_CONFIG_HOME:-~/.config}/mihomo-king/` and the active mihomo config to
