@@ -21,6 +21,7 @@ const (
 	screenDashboard screen = iota
 	screenSubs
 	screenNodes
+	screenSettings
 )
 
 // tunStage is the dashboard's modal flow for enabling TUN.
@@ -70,6 +71,12 @@ type Model struct {
 	nodeDelays     map[string]int
 	editingTestURL bool
 	testURLInput   textinput.Model
+
+	// settings
+	settingsList   list.Model
+	editingSetting bool
+	settingKey     string
+	settingInput   textinput.Model
 }
 
 // item is a generic list row. id holds the underlying name (title may be decorated).
@@ -88,6 +95,7 @@ func New(s *config.Settings) Model {
 	m := Model{settings: s}
 	m.subs = newList("Subscriptions")
 	m.nodes = newList("Nodes")
+	m.settingsList = newList("Settings")
 
 	m.nameInput = textinput.New()
 	m.nameInput.Placeholder = "name (e.g. provider-a)"
@@ -98,6 +106,8 @@ func New(s *config.Settings) Model {
 	m.testURLInput = textinput.New()
 	m.testURLInput.Placeholder = "http://www.gstatic.com/generate_204"
 	m.testURLInput.CharLimit = 2048
+	m.settingInput = textinput.New()
+	m.settingInput.CharLimit = 2048
 
 	m.pwInput = textinput.New()
 	m.pwInput.Placeholder = "sudo password"
@@ -106,6 +116,7 @@ func New(s *config.Settings) Model {
 	m.pwInput.CharLimit = 128
 
 	m.reloadSubs()
+	m.reloadSettings()
 	return m
 }
 
@@ -144,6 +155,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.subs.SetSize(msg.Width-4, bodyH)
 		m.nodes.SetSize(msg.Width-4, bodyH)
+		m.settingsList.SetSize(msg.Width-4, bodyH)
 		return m, nil
 
 	case statusMsg:
@@ -208,6 +220,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateSubs(msg)
 	case screenNodes:
 		return m.updateNodes(msg)
+	case screenSettings:
+		return m.updateSettings(msg)
 	default:
 		return m.updateDashboard(msg)
 	}
@@ -219,10 +233,10 @@ func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 	case "q":
 		return m, tea.Quit, true
 	case "tab":
-		nm, cmd := m.switchScreen((m.screen + 1) % 3)
+		nm, cmd := m.switchScreen((m.screen + 1) % 4)
 		return nm, cmd, true
 	case "shift+tab":
-		nm, cmd := m.switchScreen((m.screen + 2) % 3)
+		nm, cmd := m.switchScreen((m.screen + 3) % 4)
 		return nm, cmd, true
 	case "1":
 		nm, cmd := m.switchScreen(screenDashboard)
@@ -232,6 +246,9 @@ func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 		return nm, cmd, true
 	case "3":
 		nm, cmd := m.switchScreen(screenNodes)
+		return nm, cmd, true
+	case "4":
+		nm, cmd := m.switchScreen(screenSettings)
 		return nm, cmd, true
 	}
 	return m, nil, false
@@ -246,6 +263,9 @@ func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 		return m, nil
 	case screenNodes:
 		return m, loadGroupsCmd(m.settings)
+	case screenSettings:
+		m.reloadSettings()
+		return m, nil
 	default:
 		return m, refreshStatusCmd(m.settings)
 	}
@@ -260,6 +280,8 @@ func (m Model) View() string {
 		b.WriteString(m.viewSubs())
 	case screenNodes:
 		b.WriteString(m.viewNodes())
+	case screenSettings:
+		b.WriteString(m.viewSettings())
 	default:
 		b.WriteString(m.viewDashboard())
 	}
@@ -269,7 +291,7 @@ func (m Model) View() string {
 }
 
 func (m Model) header() string {
-	tabs := []string{"1 Dashboard", "2 Subscriptions", "3 Nodes"}
+	tabs := []string{"1 Dashboard", "2 Subscriptions", "3 Nodes", "4 Settings"}
 	parts := make([]string, len(tabs))
 	for i, t := range tabs {
 		if int(m.screen) == i {
@@ -302,7 +324,7 @@ func (m Model) help() string {
 		if m.subs.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "a add · u update · enter activate · d delete · / filter · tab/1/2/3 switch · q quit"
+		return "a add · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
 	case screenNodes:
 		if m.editingTestURL {
 			return "enter save url · esc cancel"
@@ -310,7 +332,18 @@ func (m Model) help() string {
 		if m.nodes.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "enter open/select · l test selected · a test group · u set url · esc back · r reload · / filter · tab/1/2/3 switch · q quit"
+		return "enter open/select · l test selected · a test group · u set url · esc back · r reload · / filter · tab/1/2/3/4 switch · q quit"
+	case screenSettings:
+		if m.editingSetting {
+			if len(m.settingOptions(m.settingKey)) > 0 {
+				return "tab complete · enter save · esc cancel"
+			}
+			return "enter save · esc cancel"
+		}
+		if m.settingsList.FilterState() == list.Filtering {
+			return "type to filter · enter apply · esc cancel"
+		}
+		return "enter edit/toggle · r refresh · / filter · tab/1/2/3/4 switch · q quit"
 	default:
 		switch m.tunStage {
 		case tunAskForeign:
@@ -318,7 +351,7 @@ func (m Model) help() string {
 		case tunAskPassword:
 			return "enter confirm · esc cancel"
 		}
-		return "s start · x stop · t toggle tun · r refresh · tab/2/3 switch · q quit"
+		return "s start · x stop · t toggle tun · r refresh · tab/2/3/4 switch · q quit"
 	}
 }
 
@@ -331,6 +364,26 @@ func filterOwnsKey(l list.Model, key string) bool {
 		return true
 	case list.FilterApplied:
 		return key == "esc"
+	}
+	return false
+}
+
+func wrapListKey(l *list.Model, key string) bool {
+	items := l.VisibleItems()
+	if len(items) == 0 {
+		return false
+	}
+	switch key {
+	case "j", "down":
+		if l.Index() >= len(items)-1 {
+			l.Select(0)
+			return true
+		}
+	case "k", "up":
+		if l.Index() <= 0 {
+			l.Select(len(items) - 1)
+			return true
+		}
 	}
 	return false
 }

@@ -26,8 +26,11 @@ type Subscription struct {
 
 // Settings is the persisted application configuration.
 type Settings struct {
+	ManagedTool   string         `yaml:"managed_tool"`
 	MihomoBin     string         `yaml:"mihomo_bin"`
 	MihomoDir     string         `yaml:"mihomo_dir"`
+	SingBoxBin    string         `yaml:"sing_box_bin"`
+	SingBoxDir    string         `yaml:"sing_box_dir"`
 	Controller    string         `yaml:"controller"`
 	Secret        string         `yaml:"secret"`
 	MixedPort     int            `yaml:"mixed_port"`
@@ -41,6 +44,11 @@ type Settings struct {
 
 	appDir string // resolved at Load; not persisted
 }
+
+const (
+	ToolMihomo  = "mihomo"
+	ToolSingBox = "sing-box"
+)
 
 // Load reads settings.yaml (creating it with defaults if absent), ensures the
 // app directories and a secret exist, and persists any fill-ins.
@@ -88,9 +96,50 @@ func (s *Settings) Save() error {
 func (s *Settings) AppDir() string          { return s.appDir }
 func (s *Settings) SubsDir() string         { return filepath.Join(s.appDir, "subscriptions") }
 func (s *Settings) SubPath(n string) string { return filepath.Join(s.SubsDir(), n+".yaml") }
-func (s *Settings) PidFile() string         { return filepath.Join(s.appDir, "mihomo.pid") }
-func (s *Settings) LogFile() string         { return filepath.Join(s.appDir, "mihomo.log") }
-func (s *Settings) ConfigPath() string      { return filepath.Join(s.MihomoDir, "config.yaml") }
+func (s *Settings) PidFile() string         { return filepath.Join(s.appDir, s.Tool()+".pid") }
+func (s *Settings) LogFile() string         { return filepath.Join(s.appDir, s.Tool()+".log") }
+func (s *Settings) ConfigPath() string {
+	if s.Tool() == ToolSingBox {
+		return filepath.Join(s.SingBoxDir, "config.json")
+	}
+	return filepath.Join(s.MihomoDir, "config.yaml")
+}
+
+func (s *Settings) Tool() string {
+	if s.ManagedTool == ToolSingBox {
+		return ToolSingBox
+	}
+	return ToolMihomo
+}
+
+func (s *Settings) ToolLabel() string {
+	if s.Tool() == ToolSingBox {
+		return "sing-box"
+	}
+	return "mihomo"
+}
+
+func (s *Settings) Binary() string {
+	if s.Tool() == ToolSingBox {
+		return s.SingBoxBin
+	}
+	return s.MihomoBin
+}
+
+func (s *Settings) SetBinary(path string) {
+	if s.Tool() == ToolSingBox {
+		s.SingBoxBin = path
+		return
+	}
+	s.MihomoBin = path
+}
+
+func (s *Settings) RuntimeDir() string {
+	if s.Tool() == ToolSingBox {
+		return s.SingBoxDir
+	}
+	return s.MihomoDir
+}
 
 // FindSub returns the subscription with the given name and its index, or (nil, -1).
 func (s *Settings) FindSub(name string) (*Subscription, int) {
@@ -153,23 +202,38 @@ func ValidateSubName(name string) error {
 
 func defaults() *Settings {
 	return &Settings{
-		MihomoBin:  findMihomoBin(),
-		MihomoDir:  defaultMihomoDir(),
-		Controller: "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
-		TunDevice:  "mihomo-king",    // not the default "Meta": avoid colliding with another instance's tun
-		MixedPort:  7890,
-		Mode:       "rule",
-		LogLevel:   "info",
-		TestURL:    "http://www.gstatic.com/generate_204",
+		ManagedTool: detectManagedTool(),
+		MihomoBin:   findMihomoBin(),
+		MihomoDir:   defaultMihomoDir(),
+		SingBoxBin:  findSingBoxBin(),
+		SingBoxDir:  defaultSingBoxDir(),
+		Controller:  "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
+		TunDevice:   "mihomo-king",    // not the default "Meta": avoid colliding with another instance's tun
+		MixedPort:   7890,
+		Mode:        "rule",
+		LogLevel:    "info",
+		TestURL:     "http://www.gstatic.com/generate_204",
 	}
 }
 
 func (s *Settings) applyDefaults() {
+	if s.ManagedTool == "" {
+		s.ManagedTool = detectManagedTool()
+	}
+	if s.ManagedTool != ToolSingBox {
+		s.ManagedTool = ToolMihomo
+	}
 	if s.MihomoBin == "" {
 		s.MihomoBin = findMihomoBin()
 	}
 	if s.MihomoDir == "" {
 		s.MihomoDir = defaultMihomoDir()
+	}
+	if s.SingBoxBin == "" {
+		s.SingBoxBin = findSingBoxBin()
+	}
+	if s.SingBoxDir == "" {
+		s.SingBoxDir = defaultSingBoxDir()
 	}
 	if s.Controller == "" {
 		s.Controller = "127.0.0.1:9091"
@@ -189,6 +253,36 @@ func (s *Settings) applyDefaults() {
 	if s.TestURL == "" {
 		s.TestURL = "http://www.gstatic.com/generate_204"
 	}
+	s.NormalizeForTool()
+}
+
+func (s *Settings) NormalizeForTool() {
+	if !validOption(s.Mode, Modes(s.Tool())) {
+		s.Mode = "rule"
+	}
+	if !validOption(s.LogLevel, LogLevels(s.Tool())) {
+		s.LogLevel = "info"
+	}
+}
+
+func Modes(tool string) []string {
+	return []string{"rule", "global", "direct"}
+}
+
+func LogLevels(tool string) []string {
+	if tool == ToolSingBox {
+		return []string{"trace", "debug", "info", "warn", "error", "fatal", "panic"}
+	}
+	return []string{"debug", "info", "warning", "error", "silent"}
+}
+
+func validOption(value string, options []string) bool {
+	for _, option := range options {
+		if value == option {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Settings) ensureSecret() {
@@ -204,22 +298,51 @@ func (s *Settings) ensureSecret() {
 }
 
 func findMihomoBin() string {
-	for _, name := range []string{"mihomo", "clash-meta", "clash"} {
+	if p := findBin([]string{"mihomo", "clash-meta", "clash"}, "mihomo"); p != "" {
+		return p
+	}
+	return "mihomo"
+}
+
+func findSingBoxBin() string {
+	if p := findBin([]string{"sing-box"}, "sing-box"); p != "" {
+		return p
+	}
+	return "sing-box"
+}
+
+func findBin(names []string, fallback string) string {
+	for _, name := range names {
 		if p, err := exec.LookPath(name); err == nil {
 			return p
 		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		if p := filepath.Join(home, ".bin", "cmd", "mihomo"); fileExists(p) {
+		if p := filepath.Join(home, ".bin", "cmd", fallback); fileExists(p) {
 			return p
 		}
 	}
-	return "mihomo"
+	return ""
+}
+
+func detectManagedTool() string {
+	if p := findMihomoBin(); p != "mihomo" {
+		return ToolMihomo
+	}
+	if p := findSingBoxBin(); p != "sing-box" {
+		return ToolSingBox
+	}
+	return ToolMihomo
 }
 
 func defaultMihomoDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "mihomo")
+}
+
+func defaultSingBoxDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "sing-box")
 }
 
 func appDir() (string, error) {

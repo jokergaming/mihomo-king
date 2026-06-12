@@ -21,6 +21,9 @@ func (m Model) updateNodes(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.nodes, cmd = m.nodes.Update(msg)
 			return m, cmd
 		}
+		if wrapListKey(&m.nodes, k.String()) {
+			return m, nil
+		}
 		switch k.String() {
 		case "esc":
 			if m.curGroup != "" {

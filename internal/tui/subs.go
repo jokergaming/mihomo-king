@@ -20,6 +20,9 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.subs, cmd = m.subs.Update(msg)
 			return m, cmd
 		}
+		if wrapListKey(&m.subs, k.String()) {
+			return m, nil
+		}
 		switch k.String() {
 		case "a":
 			m.adding = true

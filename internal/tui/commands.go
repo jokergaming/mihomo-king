@@ -83,7 +83,7 @@ func startCmd(s *config.Settings) tea.Cmd {
 		if err := mihomo.Start(s); err != nil {
 			return actionMsg{err: err}
 		}
-		return actionMsg{note: "mihomo started"}
+		return actionMsg{note: s.ToolLabel() + " started"}
 	}
 }
 
@@ -92,7 +92,7 @@ func stopCmd(s *config.Settings) tea.Cmd {
 		if err := mihomo.Stop(s); err != nil {
 			return actionMsg{err: err}
 		}
-		return actionMsg{note: "mihomo stopped"}
+		return actionMsg{note: s.ToolLabel() + " stopped"}
 	}
 }
 
@@ -103,9 +103,13 @@ func toggleTunCmd(s *config.Settings) tea.Cmd {
 		if err := s.WriteActiveFromStore(); err != nil {
 			return actionMsg{err: err}
 		}
-		if running, _ := mihomo.Running(s); running {
+		if running, _ := mihomo.Running(s); running && s.Tool() == config.ToolMihomo {
 			if err := api.New(controller, secret).SetTun(want); err != nil {
 				return actionMsg{err: fmt.Errorf("tun live toggle: %w", err)}
+			}
+		} else if running {
+			if err := mihomo.Restart(s); err != nil {
+				return actionMsg{err: fmt.Errorf("restart for tun change: %w", err)}
 			}
 		}
 		if want {
@@ -129,9 +133,9 @@ func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd
 		needRestart := false
 		if mihomo.MissingTunCaps(s) {
 			if password == "" {
-				return actionMsg{err: fmt.Errorf("mihomo lacks net caps; press t again to enter the sudo password")}
+				return actionMsg{err: fmt.Errorf("%s lacks net caps; press t again to enter the sudo password", s.ToolLabel())}
 			}
-			if err := mihomo.GrantNetCaps(password, s.MihomoBin); err != nil {
+			if err := mihomo.GrantNetCaps(password, s.Binary()); err != nil {
 				return actionMsg{err: err}
 			}
 			needRestart = true // caps are read at exec time; the running process doesn't gain them
@@ -149,9 +153,13 @@ func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd
 			if err := mihomo.Restart(s); err != nil {
 				return actionMsg{err: fmt.Errorf("restart after setcap: %v", err)}
 			}
-		case running:
+		case running && s.Tool() == config.ToolMihomo:
 			if err := api.New(controller, secret).SetTun(true); err != nil {
 				return actionMsg{err: fmt.Errorf("tun live toggle: %w", err)}
+			}
+		case running:
+			if err := mihomo.Restart(s); err != nil {
+				return actionMsg{err: fmt.Errorf("restart for tun change: %v", err)}
 			}
 		}
 		return actionMsg{note: "TUN on"}
@@ -165,9 +173,13 @@ func switchSubCmd(s *config.Settings) tea.Cmd {
 		if err := s.WriteActiveFromStore(); err != nil {
 			return actionMsg{err: err}
 		}
-		if running, _ := mihomo.Running(s); running {
+		if running, _ := mihomo.Running(s); running && s.Tool() == config.ToolMihomo {
 			if err := api.New(controller, secret).ReloadConfig(s.ConfigPath()); err != nil {
 				return actionMsg{err: fmt.Errorf("reload: %w", err)}
+			}
+		} else if running {
+			if err := mihomo.Restart(s); err != nil {
+				return actionMsg{err: fmt.Errorf("restart: %w", err)}
 			}
 		}
 		return actionMsg{note: "switched to " + active}
@@ -196,11 +208,11 @@ func loadGroupsCmd(s *config.Settings) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return groupsMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+			return groupsMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		groups, err := api.New(controller, secret).Groups()
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
 		return groupsMsg{groups: groups, err: err}
 	}
@@ -210,11 +222,11 @@ func selectNodeCmd(s *config.Settings, group, node string) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return actionMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+			return actionMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		err := api.New(controller, secret).SelectNode(group, node)
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
 		if err != nil {
 			return actionMsg{err: err}
@@ -227,11 +239,11 @@ func testNodeCmd(s *config.Settings, group, node string) tea.Cmd {
 	controller, secret, testURL := s.Controller, s.Secret, s.TestURL
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return delayMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+			return delayMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		delay, err := api.New(controller, secret).Delay(node, testURL, 5000)
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
 		if err != nil {
 			return delayMsg{err: err}
@@ -244,11 +256,11 @@ func testGroupCmd(s *config.Settings, group string) tea.Cmd {
 	controller, secret, testURL := s.Controller, s.Secret, s.TestURL
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return delayMsg{err: fmt.Errorf("mihomo is not running; start it from dashboard first")}
+			return delayMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		delays, err := api.New(controller, secret).GroupDelay(group, testURL, 5000)
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart mihomo from dashboard or check %s", s.ConfigPath())
+			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
 		if err != nil {
 			return delayMsg{err: err}

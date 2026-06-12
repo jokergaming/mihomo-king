@@ -49,6 +49,9 @@ func (s *Settings) MergeConfig(subYAML []byte) ([]byte, error) {
 
 // WriteActiveConfig merges subYAML and writes mihomo's runtime config.yaml.
 func (s *Settings) WriteActiveConfig(subYAML []byte) error {
+	if s.Tool() == ToolSingBox {
+		return s.WriteSingBoxConfig(subYAML)
+	}
 	merged, err := s.MergeConfig(subYAML)
 	if err != nil {
 		return err

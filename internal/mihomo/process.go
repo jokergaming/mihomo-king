@@ -1,4 +1,4 @@
-// Package mihomo launches and tracks the mihomo proxy as a detached background
+// Package mihomo launches and tracks the managed proxy as a detached background
 // subprocess, recording its PID so it survives this TUI exiting.
 package mihomo
 
@@ -19,26 +19,26 @@ import (
 	"mihomo-king/internal/config"
 )
 
-// Running reports whether the tracked mihomo process is alive, with its PID.
+// Running reports whether the tracked managed process is alive, with its PID.
 func Running(s *config.Settings) (bool, int) {
 	pid, err := readPID(s.PidFile())
 	if err != nil {
 		return false, 0
 	}
-	if !alive(pid) || !matchesBinary(pid, s.MihomoBin) {
+	if !alive(pid) || !matchesBinary(pid, s.Binary()) {
 		_ = os.Remove(s.PidFile())
 		return false, 0
 	}
 	return true, pid
 }
 
-// Start writes the active config from the stored subscription and launches
-// mihomo detached. It is a no-op if mihomo is already running.
+// Start writes the active config from the stored subscription and launches the
+// selected tool detached. It is a no-op if it is already running.
 func Start(s *config.Settings) error {
 	if ok, _ := Running(s); ok {
 		return nil
 	}
-	if err := checkBinary(s.MihomoBin); err != nil {
+	if err := checkBinary(s.ToolLabel(), s.Binary()); err != nil {
 		return err
 	}
 	// An empty active config (no proxies/groups) is never what the user wants;
@@ -46,10 +46,10 @@ func Start(s *config.Settings) error {
 	if s.Active == "" {
 		return fmt.Errorf("no active subscription — press 2, pick one, press enter to activate, then start")
 	}
-	// Our mihomo isn't running, so a taken controller port means another
-	// clash/mihomo instance owns it — starting would silently collide with it.
+	// Our managed tool isn't running, so a taken controller port means another
+	// process owns it — starting would silently collide with it.
 	if controllerPortBusy(s.Controller) {
-		return fmt.Errorf("controller %s is already in use by another process (another clash/mihomo?); change controller in settings.yaml", s.Controller)
+		return fmt.Errorf("controller %s is already in use by another process; change controller in settings", s.Controller)
 	}
 	if err := s.WriteActiveFromStore(); err != nil {
 		return fmt.Errorf("write config: %w", err)
@@ -61,7 +61,7 @@ func Start(s *config.Settings) error {
 	}
 	defer logf.Close()
 
-	cmd := exec.Command(s.MihomoBin, "-d", s.MihomoDir, "-f", s.ConfigPath())
+	cmd := exec.Command(s.Binary(), startArgs(s)...)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own process group: outlive the TUI
@@ -76,12 +76,12 @@ func Start(s *config.Settings) error {
 	if err := waitController(s.Controller, s.Secret, 5*time.Second); err != nil {
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
 		_ = os.Remove(s.PidFile())
-		return fmt.Errorf("mihomo controller was not ready: %w; see %s", err, s.LogFile())
+		return fmt.Errorf("%s controller was not ready: %w; see %s", s.ToolLabel(), err, s.LogFile())
 	}
 	return nil
 }
 
-// Stop terminates the tracked mihomo process group.
+// Stop terminates the tracked process group.
 func Stop(s *config.Settings) error {
 	pid, err := readPID(s.PidFile())
 	if err != nil {
@@ -109,12 +109,19 @@ func MissingTunCaps(s *config.Settings) bool {
 	if os.Geteuid() == 0 {
 		return false
 	}
-	out, err := exec.Command("getcap", s.MihomoBin).Output()
-	if err != nil {
+	caps, ok := NetCaps(s.Binary())
+	if !ok {
 		return false // getcap unavailable or path odd; don't cry wolf
 	}
-	caps := string(out)
 	return !strings.Contains(caps, "cap_net_admin") || !strings.Contains(caps, "cap_net_raw")
+}
+
+func NetCaps(bin string) (string, bool) {
+	out, err := exec.Command("getcap", bin).Output()
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
 }
 
 // ForeignTunDevices lists TUN interfaces that are up but aren't ours (e.g.
@@ -149,15 +156,22 @@ func controllerPortBusy(controller string) bool {
 	return false
 }
 
-func checkBinary(bin string) error {
+func startArgs(s *config.Settings) []string {
+	if s.Tool() == config.ToolSingBox {
+		return []string{"run", "-D", s.RuntimeDir(), "-c", s.ConfigPath()}
+	}
+	return []string{"-d", s.RuntimeDir(), "-f", s.ConfigPath()}
+}
+
+func checkBinary(label, bin string) error {
 	if bin == "" {
-		return fmt.Errorf("mihomo binary not configured")
+		return fmt.Errorf("%s binary not configured", label)
 	}
 	if _, err := exec.LookPath(bin); err == nil {
 		return nil
 	}
 	if _, err := os.Stat(bin); err != nil {
-		return fmt.Errorf("mihomo binary %q not found", bin)
+		return fmt.Errorf("%s binary %q not found", label, bin)
 	}
 	return nil
 }

@@ -132,7 +132,7 @@ func (m Model) viewDashboard() string {
 	if m.running {
 		state = okStyle.Render(fmt.Sprintf("running (pid %d)", m.pid))
 	}
-	row("mihomo", state)
+	row(m.settings.ToolLabel(), state)
 	if m.version != "" {
 		row("version", m.version)
 	}
@@ -155,6 +155,8 @@ func (m Model) viewDashboard() string {
 	}
 	row("subscription", active)
 	row("controller", m.settings.Controller)
+	row("binary", m.settings.Binary())
+	row("config", m.settings.ConfigPath())
 
 	switch m.tunStage {
 	case tunAskForeign:
@@ -165,11 +167,11 @@ func (m Model) viewDashboard() string {
 			"  (c) enable ours anyway\n" +
 			"  (esc) cancel")
 	case tunAskPassword:
-		what := "grant net caps to mihomo (setcap)"
+		what := "grant net caps to " + m.settings.ToolLabel() + " (setcap)"
 		if len(m.tunDelDevs) > 0 {
 			what = "shut down " + strings.Join(m.tunDelDevs, ", ")
 			if mihomo.MissingTunCaps(m.settings) {
-				what += " + setcap mihomo"
+				what += " + setcap " + m.settings.ToolLabel()
 			}
 		}
 		b.WriteString("\n  sudo password — will " + what + ", then enable TUN:\n  " + m.pwInput.View())
@@ -178,7 +180,7 @@ func (m Model) viewDashboard() string {
 	if m.tunStage == tunIdle {
 		if m.capWarn {
 			b.WriteString("\n" + warnStyle.Render(
-				"⚠ TUN is on but mihomo lacks net caps. Run:\n  sudo setcap cap_net_admin,cap_net_raw=ep "+m.settings.MihomoBin))
+				"⚠ TUN is on but "+m.settings.ToolLabel()+" lacks net caps. Run:\n  sudo setcap cap_net_admin,cap_net_raw=ep "+m.settings.Binary()))
 		}
 		if len(m.foreignTun) > 0 {
 			b.WriteString("\n" + warnStyle.Render(fmt.Sprintf(
