@@ -1,14 +1,18 @@
 # mihomo-king
 
-A small Linux TUI for managing a [mihomo](https://github.com/MetaCubeX/mihomo)
-(Clash.Meta) proxy, built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+A small Linux TUI for managing [mihomo](https://github.com/MetaCubeX/mihomo)
+(Clash.Meta) or [sing-box](https://github.com/SagerNet/sing-box) proxy cores,
+built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Features
 
 - Download and store subscriptions (Clash/mihomo YAML).
-- Switch the active subscription and reload mihomo.
+- Switch the active subscription and reload the managed core.
+- Manage either mihomo or sing-box from the settings screen.
+- Convert Clash/mihomo subscriptions into sing-box runtime config.
 - Toggle TUN mode.
 - Switch the selected node within a proxy group.
+- Test node and group latency with a configurable test URL.
 
 ## Build & run
 
@@ -34,20 +38,23 @@ The release uploads `tar.gz` archives and SHA-256 checksum files for:
 - `darwin-amd64`
 - `darwin-arm64`
 
-The tool manages mihomo as a background subprocess (start/stop from the dashboard)
-and talks to its RESTful API for live changes. It writes its own settings to
-`${XDG_CONFIG_HOME:-~/.config}/mihomo-king/` and the active mihomo config to
-`~/.config/mihomo/config.yaml`.
+The tool manages the selected core as a background subprocess (start/stop from
+the dashboard) and talks to its Clash-compatible API for live changes. It writes
+its own settings to `${XDG_CONFIG_HOME:-~/.config}/mihomo-king/`, the active
+mihomo config to `~/.config/mihomo/config.yaml`, and the active sing-box config
+to `~/.config/sing-box/config.json`.
 
 ## TUN requires privileges
 
-Creating a TUN device needs `CAP_NET_ADMIN`/`CAP_NET_RAW`. When you enable TUN in the
-dashboard, the tool handles privileges itself: if the mihomo binary lacks the caps it
-asks for your sudo password (masked, in-TUI) and runs `setcap` for you, restarting
-mihomo so the caps take effect. To grant them ahead of time instead:
+Creating a TUN device needs `CAP_NET_ADMIN`/`CAP_NET_RAW`. When you enable TUN in
+the dashboard, the tool handles privileges itself: if the selected core binary
+lacks the caps it asks for your sudo password (masked, in-TUI) and runs `setcap`
+for you, restarting the managed core so the caps take effect. To grant them
+ahead of time instead:
 
 ```bash
 sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v mihomo)"
+sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v sing-box)"
 ```
 
 If another TUN device is already up (e.g. a coexisting clash GUI), enabling TUN asks
