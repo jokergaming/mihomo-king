@@ -88,16 +88,25 @@ func (s *Settings) SingBoxConfig(subYAML []byte) (map[string]any, error) {
 		final = groupNames[0]
 	}
 
+	route := map[string]any{
+		"rules": []map[string]any{
+			{"action": "sniff"},
+			{"protocol": "dns", "action": "hijack-dns"},
+			{"ip_is_private": true, "outbound": "DIRECT"},
+		},
+		"default_domain_resolver": "local",
+		"auto_detect_interface":   s.TunEnable,
+		"final":                   final,
+	}
+
 	return map[string]any{
 		"log": map[string]any{
 			"level": s.LogLevel,
 		},
 		"inbounds":  singBoxInbounds(s),
 		"outbounds": outbounds,
-		"route": map[string]any{
-			"auto_detect_interface": s.TunEnable,
-			"final":                 final,
-		},
+		"dns":       singBoxDNS(final),
+		"route":     route,
 		"experimental": map[string]any{
 			"clash_api": map[string]any{
 				"external_controller": s.Controller,
@@ -111,6 +120,29 @@ func (s *Settings) SingBoxConfig(subYAML []byte) (map[string]any, error) {
 			},
 		},
 	}, nil
+}
+
+func singBoxDNS(final string) map[string]any {
+	remote := map[string]any{
+		"type":   "https",
+		"tag":    "remote",
+		"server": "cloudflare-dns.com",
+	}
+	if final != "DIRECT" {
+		remote["detour"] = final
+	}
+	return map[string]any{
+		"servers": []map[string]any{
+			remote,
+			{
+				"type":   "udp",
+				"tag":    "local",
+				"server": "223.5.5.5",
+			},
+		},
+		"final":    "remote",
+		"strategy": "ipv4_only",
+	}
 }
 
 func singBoxInbounds(s *Settings) []map[string]any {
@@ -128,6 +160,7 @@ func singBoxInbounds(s *Settings) []map[string]any {
 			"address":        []string{s.TunAddress},
 			"stack":          "system",
 			"auto_route":     true,
+			"auto_redirect":  true,
 			"strict_route":   true,
 			"mtu":            9000,
 		})
@@ -192,6 +225,8 @@ func clashProxyToSingBox(proxy map[string]any) (map[string]any, bool) {
 	out := map[string]any{"type": proxyType, "tag": name}
 	copyString(out, proxy, "server")
 	copyInt(out, proxy, "server_port", "port")
+	copyTLS(out, proxy)
+	copyTransport(out, proxy)
 	switch proxyType {
 	case "ss", "shadowsocks":
 		out["type"] = "shadowsocks"
@@ -220,6 +255,45 @@ func clashProxyToSingBox(proxy map[string]any) (map[string]any, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+func copyTLS(dst, src map[string]any) {
+	enabled, ok := boolValue(src["tls"])
+	if !ok || !enabled {
+		return
+	}
+	tls := map[string]any{"enabled": true}
+	copyStringAs(tls, "server_name", src, "servername", "sni")
+	if insecure, ok := boolValue(src["skip-cert-verify"]); ok {
+		tls["insecure"] = insecure
+	}
+	if fingerprint := str(src["client-fingerprint"]); fingerprint != "" {
+		tls["utls"] = map[string]any{
+			"enabled":     true,
+			"fingerprint": fingerprint,
+		}
+	}
+	dst["tls"] = tls
+}
+
+func copyTransport(dst, src map[string]any) {
+	switch strings.ToLower(str(src["network"])) {
+	case "ws", "websocket":
+		transport := map[string]any{"type": "ws"}
+		if opts, ok := src["ws-opts"].(map[string]any); ok {
+			copyString(transport, opts, "path")
+			if headers, ok := opts["headers"].(map[string]any); ok && len(headers) > 0 {
+				transport["headers"] = headers
+			}
+		}
+		dst["transport"] = transport
+	case "grpc":
+		transport := map[string]any{"type": "grpc"}
+		if opts, ok := src["grpc-opts"].(map[string]any); ok {
+			copyStringAs(transport, "service_name", opts, "grpc-service-name", "serviceName")
+		}
+		dst["transport"] = transport
+	}
 }
 
 func mapSlice(v any) []map[string]any {
@@ -296,4 +370,9 @@ func copyInt(dst, src map[string]any, dstKey, srcKey string) {
 	case float64:
 		dst[dstKey] = int(v)
 	}
+}
+
+func boolValue(v any) (bool, bool) {
+	b, ok := v.(bool)
+	return b, ok
 }

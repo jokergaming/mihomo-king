@@ -97,7 +97,7 @@ func (m Model) nodesEnter() (tea.Model, tea.Cmd) {
 		m.showMembers(sel.id)
 		return m, nil
 	}
-	if g := m.findGroup(m.curGroup); g != nil && g.Type != "Selector" {
+	if g := m.findGroup(m.curGroup); g != nil && !isSelectorType(g.Type) {
 		m.setErr(fmt.Sprintf("%s picks nodes automatically (%s); only select-type groups are switchable", m.curGroup, g.Type))
 		return m, nil
 	}
@@ -148,7 +148,7 @@ func (m *Model) showGroups() {
 	items := make([]list.Item, 0, len(m.groups))
 	for _, g := range m.groups {
 		auto := ""
-		if g.Type != "Selector" {
+		if !isSelectorType(g.Type) {
 			auto = "  ·  auto"
 		}
 		items = append(items, item{
@@ -177,11 +177,15 @@ func (m *Model) showMembers(group string) {
 		items = append(items, item{title: title, desc: m.delayDescription(name), id: name})
 	}
 	m.nodes.Title = group
-	if g.Type != "Selector" {
+	if !isSelectorType(g.Type) {
 		m.nodes.Title = fmt.Sprintf("%s (%s — picks automatically)", group, g.Type)
 	}
 	m.nodes.SetItems(items)
 	m.nodes.ResetSelected()
+}
+
+func isSelectorType(typ string) bool {
+	return strings.EqualFold(typ, "selector") || strings.EqualFold(typ, "select")
 }
 
 func (m Model) viewNodes() string {

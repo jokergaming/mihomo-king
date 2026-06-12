@@ -52,6 +52,9 @@ rules:
 	if got := inbounds[1]["address"]; !sameStrings(got, []string{"172.19.0.1/30"}) {
 		t.Fatalf("tun address = %#v, want 172.19.0.1/30", got)
 	}
+	if inbounds[1]["auto_redirect"] != true {
+		t.Fatalf("tun auto_redirect = %v, want true", inbounds[1]["auto_redirect"])
+	}
 	if _, ok := inbounds[1]["auto_detect_interface"]; ok {
 		t.Fatalf("auto_detect_interface must not be written to tun inbound: %#v", inbounds[1])
 	}
@@ -73,6 +76,28 @@ rules:
 	}
 	if route["auto_detect_interface"] != true {
 		t.Fatalf("route.auto_detect_interface = %v, want true", route["auto_detect_interface"])
+	}
+	if route["default_domain_resolver"] != "local" {
+		t.Fatalf("route.default_domain_resolver = %v, want local", route["default_domain_resolver"])
+	}
+	rules := route["rules"].([]map[string]any)
+	if len(rules) < 2 || rules[0]["action"] != "sniff" || rules[1]["action"] != "hijack-dns" {
+		t.Fatalf("route rules do not sniff and hijack dns: %#v", rules)
+	}
+
+	dns := cfg["dns"].(map[string]any)
+	if dns["final"] != "remote" || dns["strategy"] != "ipv4_only" {
+		t.Fatalf("dns defaults not injected: %#v", dns)
+	}
+	servers := dns["servers"].([]map[string]any)
+	if len(servers) != 2 || servers[0]["tag"] != "remote" || servers[0]["detour"] != "PROXY" || servers[1]["tag"] != "local" {
+		t.Fatalf("dns servers not injected correctly: %#v", servers)
+	}
+	if servers[0]["server"] != "cloudflare-dns.com" {
+		t.Fatalf("remote dns server = %v, want cloudflare-dns.com", servers[0]["server"])
+	}
+	if _, ok := servers[1]["detour"]; ok {
+		t.Fatalf("local dns server must not detour through DIRECT: %#v", servers[1])
 	}
 }
 
@@ -111,6 +136,44 @@ proxy-groups:
 	}
 	if got := manual["outbounds"]; !sameStrings(got, []string{"自动选择", "n1"}) {
 		t.Fatalf("手动选择 outbounds = %#v, want 自动选择 + n1", got)
+	}
+}
+
+func TestSingBoxConfigConvertsTLSWebSocket(t *testing.T) {
+	sub := []byte(`
+proxies:
+  - {name: cf, type: vless, server: 162.159.38.208, port: 2053, uuid: 7e550ef0-9601-4968-8d8e-103fab975c5d, tls: true, skip-cert-verify: false, servername: illmatic94943.pages.dev, client-fingerprint: chrome, network: ws, ws-opts: {path: /, headers: {Host: illmatic94943.pages.dev}}}
+proxy-groups:
+  - {name: PROXY, type: select, proxies: [cf]}
+`)
+	s := &Settings{
+		ManagedTool: ToolSingBox,
+		Controller:  "127.0.0.1:9091",
+		Secret:      "sekret",
+		MixedPort:   7890,
+		Mode:        "rule",
+		LogLevel:    "info",
+	}
+
+	cfg, err := s.SingBoxConfig(sub)
+	if err != nil {
+		t.Fatalf("SingBoxConfig: %v", err)
+	}
+	cf := findOutbound(cfg["outbounds"].([]map[string]any), "cf")
+	if cf == nil {
+		t.Fatalf("cf outbound missing")
+	}
+	tls, ok := cf["tls"].(map[string]any)
+	if !ok || tls["enabled"] != true || tls["server_name"] != "illmatic94943.pages.dev" {
+		t.Fatalf("tls not converted: %#v", cf["tls"])
+	}
+	transport, ok := cf["transport"].(map[string]any)
+	if !ok || transport["type"] != "ws" || transport["path"] != "/" {
+		t.Fatalf("ws transport not converted: %#v", cf["transport"])
+	}
+	headers, ok := transport["headers"].(map[string]any)
+	if !ok || headers["Host"] != "illmatic94943.pages.dev" {
+		t.Fatalf("ws headers not converted: %#v", transport["headers"])
 	}
 }
 

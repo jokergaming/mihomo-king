@@ -146,6 +146,14 @@ func ForeignTunDevices(own string) []string {
 	return tuns
 }
 
+func TunDeviceUp(name string) bool {
+	iface, err := net.InterfaceByName(name)
+	if err != nil {
+		return false
+	}
+	return iface.Flags&net.FlagUp != 0
+}
+
 func controllerPortBusy(controller string) bool {
 	addr := strings.TrimPrefix(strings.TrimPrefix(controller, "https://"), "http://")
 	ln, err := net.Listen("tcp", addr)

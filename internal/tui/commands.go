@@ -67,7 +67,12 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 			}
 			if cfg, err := c.Configs(); err == nil {
 				msg.mode = cfg.Mode
-				msg.tun = cfg.Tun.Enable
+				if s.Tool() == config.ToolMihomo {
+					msg.tun = cfg.Tun.Enable
+				}
+			}
+			if s.Tool() == config.ToolSingBox {
+				msg.tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
 			}
 		}
 		if s.TunEnable {
@@ -258,7 +263,11 @@ func testGroupCmd(s *config.Settings, group string) tea.Cmd {
 		if running, _ := mihomo.Running(s); !running {
 			return delayMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
-		delays, err := api.New(controller, secret).GroupDelay(group, testURL, 5000)
+		c := api.New(controller, secret)
+		delays, err := c.GroupDelay(group, testURL, 5000)
+		if err != nil && s.Tool() == config.ToolSingBox {
+			delays, err = testGroupMembers(c, group, testURL)
+		}
 		if errors.Is(err, api.ErrUnauthorized) {
 			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
@@ -267,4 +276,31 @@ func testGroupCmd(s *config.Settings, group string) tea.Cmd {
 		}
 		return delayMsg{group: group, delays: delays}
 	}
+}
+
+func testGroupMembers(c *api.Client, group, testURL string) (map[string]int, error) {
+	groups, err := c.Groups()
+	if err != nil {
+		return nil, err
+	}
+	var members []string
+	for _, g := range groups {
+		if g.Name == group {
+			members = g.All
+			break
+		}
+	}
+	if len(members) == 0 {
+		return nil, fmt.Errorf("group %s has no testable members", group)
+	}
+	delays := map[string]int{}
+	for _, node := range members {
+		delay, err := c.Delay(node, testURL, 5000)
+		if err != nil {
+			delays[node] = 0
+			continue
+		}
+		delays[node] = delay
+	}
+	return delays, nil
 }
