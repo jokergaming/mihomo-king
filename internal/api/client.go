@@ -19,10 +19,11 @@ var ErrUnauthorized = errors.New("controller unauthorized")
 
 // Client talks to a mihomo external-controller.
 type Client struct {
-	base     string
-	secret   string
-	http     *http.Client // reads + light mutations
-	httpSlow *http.Client // config mutations: tun toggle / reload rebuild listeners and fetch providers
+	base         string
+	secret       string
+	http         *http.Client // reads + light mutations
+	httpSlow     *http.Client // config mutations: tun toggle / reload rebuild listeners and fetch providers
+	verifyWindow time.Duration
 }
 
 // New builds a client for controller (host:port or full URL) and bearer secret.
@@ -32,17 +33,20 @@ func New(controller, secret string) *Client {
 		base = "http://" + base
 	}
 	return &Client{
-		base:     strings.TrimRight(base, "/"),
-		secret:   secret,
-		http:     &http.Client{Timeout: 10 * time.Second},
-		httpSlow: &http.Client{Timeout: 60 * time.Second},
+		base:         strings.TrimRight(base, "/"),
+		secret:       secret,
+		http:         &http.Client{Timeout: 10 * time.Second},
+		httpSlow:     &http.Client{Timeout: 60 * time.Second},
+		verifyWindow: 30 * time.Second,
 	}
 }
 
-// SetTimeouts overrides the read and mutation timeouts (used by tests).
-func (c *Client) SetTimeouts(read, mutate time.Duration) {
+// SetTimeouts overrides the read/mutation timeouts and the post-error state
+// verification window (used by tests).
+func (c *Client) SetTimeouts(read, mutate, verify time.Duration) {
 	c.http.Timeout = read
 	c.httpSlow.Timeout = mutate
+	c.verifyWindow = verify
 }
 
 // Proxy is a single proxy or group entry from GET /proxies.
@@ -132,22 +136,24 @@ func (c *Client) SelectNode(group, node string) error {
 	return c.send(http.MethodPut, "/proxies/"+url.PathEscape(group), map[string]string{"name": node})
 }
 
-// SetTun toggles TUN live without a restart (PATCH /configs). Applying it can
-// take a while (device + route setup tears down listeners), so this uses the
-// slow client — and if the request still errors, the runtime state is checked
-// before reporting: a timed-out patch has usually been applied anyway.
+// SetTun toggles TUN live without a restart (PATCH /configs). While applying
+// the patch mihomo rebuilds listeners and routes, which can stall — or kill —
+// the very connection awaiting the response, so a request error proves
+// nothing. On error the runtime state is polled for the whole verify window
+// (the patch is usually applied even when the response never arrived); the
+// error only surfaces when the state never reaches the target.
 func (c *Client) SetTun(enable bool) error {
 	err := c.sendSlow(http.MethodPatch, "/configs", map[string]any{"tun": map[string]any{"enable": enable}})
 	if err == nil {
 		return nil
 	}
-	for i := 0; i < 5; i++ {
+	deadline := time.Now().Add(c.verifyWindow)
+	for time.Now().Before(deadline) {
 		time.Sleep(time.Second)
-		if cfg, e := c.Configs(); e == nil {
-			if cfg.Tun.Enable == enable {
-				return nil
-			}
-			break // controller is back and disagrees: the patch really failed
+		// A read of the stale state is normal while the patch is still being
+		// applied — keep polling until the window closes.
+		if cfg, e := c.Configs(); e == nil && cfg.Tun.Enable == enable {
+			return nil
 		}
 	}
 	return err
