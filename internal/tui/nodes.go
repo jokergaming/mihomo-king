@@ -97,16 +97,22 @@ func (m Model) nodesEnter() (tea.Model, tea.Cmd) {
 		m.showMembers(sel.id)
 		return m, nil
 	}
+	if child := m.findGroup(sel.id); child != nil && child.Name != m.curGroup {
+		if g := m.findGroup(m.curGroup); g != nil && isSelectorType(g.Type) {
+			m.pendingGroup = child.Name
+			m.setStatus("switching…")
+			return m, selectNodeAndLoadGroupsCmd(m.settings, m.curGroup, child.Name)
+		}
+		m.curGroup = child.Name
+		m.showMembers(child.Name)
+		return m, nil
+	}
 	if g := m.findGroup(m.curGroup); g != nil && !isSelectorType(g.Type) {
 		m.setErr(fmt.Sprintf("%s picks nodes automatically (%s); only select-type groups are switchable", m.curGroup, g.Type))
 		return m, nil
 	}
 	m.setStatus("switching…")
-	// select, then reload groups to reflect the new selection
-	return m, tea.Sequence(
-		selectNodeCmd(m.settings, m.curGroup, sel.id),
-		loadGroupsCmd(m.settings),
-	)
+	return m, selectNodeAndLoadGroupsCmd(m.settings, m.curGroup, sel.id)
 }
 
 func (m Model) testSelectedNode() (tea.Model, tea.Cmd) {
@@ -143,6 +149,24 @@ func (m *Model) findGroup(name string) *api.Group {
 	return nil
 }
 
+func (m *Model) openPendingGroupOrShowGroups() {
+	if m.pendingGroup != "" {
+		group, node := m.pendingGroup, m.pendingNode
+		m.pendingGroup = ""
+		m.pendingNode = ""
+		if m.findGroup(group) != nil {
+			m.curGroup = group
+			m.showMembers(group)
+			if node != "" {
+				m.selectNodeItem(node)
+			}
+			return
+		}
+	}
+	m.curGroup = ""
+	m.showGroups()
+}
+
 func (m *Model) showGroups() {
 	m.nodes.ResetFilter() // stale filter from the previous view would hide items
 	items := make([]list.Item, 0, len(m.groups))
@@ -162,6 +186,16 @@ func (m *Model) showGroups() {
 	m.nodes.ResetSelected()
 }
 
+func (m *Model) selectNodeItem(name string) {
+	for i, it := range m.nodes.Items() {
+		row, ok := it.(item)
+		if ok && row.id == name {
+			m.nodes.Select(i)
+			return
+		}
+	}
+}
+
 func (m *Model) showMembers(group string) {
 	g := m.findGroup(group)
 	if g == nil {
@@ -174,7 +208,7 @@ func (m *Model) showMembers(group string) {
 		if name == g.Now {
 			title = "● " + name
 		}
-		items = append(items, item{title: title, desc: m.delayDescription(name), id: name})
+		items = append(items, item{title: title, desc: m.memberDescription(name), id: name})
 	}
 	m.nodes.Title = group
 	if !isSelectorType(g.Type) {
@@ -186,6 +220,17 @@ func (m *Model) showMembers(group string) {
 
 func isSelectorType(typ string) bool {
 	return strings.EqualFold(typ, "selector") || strings.EqualFold(typ, "select")
+}
+
+func (m *Model) memberDescription(name string) string {
+	if group := m.findGroup(name); group != nil {
+		desc := fmt.Sprintf("%s group  ·  now: %s  ·  %d nodes", group.Type, group.Now, len(group.All))
+		if delay := m.delayDescription(name); delay != "" {
+			desc += "  ·  " + delay
+		}
+		return desc
+	}
+	return m.delayDescription(name)
 }
 
 func (m Model) viewNodes() string {

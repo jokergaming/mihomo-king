@@ -27,6 +27,7 @@ type statusMsg struct {
 
 type groupsMsg struct {
 	groups []api.Group
+	note   string
 	err    error
 }
 
@@ -264,20 +265,24 @@ func loadGroupsCmd(s *config.Settings) tea.Cmd {
 	}
 }
 
-func selectNodeCmd(s *config.Settings, group, node string) tea.Cmd {
+func selectNodeAndLoadGroupsCmd(s *config.Settings, group, node string) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return actionMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
+			return groupsMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
-		err := api.New(controller, secret).SelectNode(group, node)
+		c := api.New(controller, secret)
+		if err := c.SelectNode(group, node); err != nil {
+			if errors.Is(err, api.ErrUnauthorized) {
+				err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
+			}
+			return groupsMsg{err: err}
+		}
+		groups, err := c.Groups()
 		if errors.Is(err, api.ErrUnauthorized) {
 			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
-		if err != nil {
-			return actionMsg{err: err}
-		}
-		return actionMsg{note: group + " → " + node}
+		return groupsMsg{groups: groups, note: group + " → " + node, err: err}
 	}
 }
 

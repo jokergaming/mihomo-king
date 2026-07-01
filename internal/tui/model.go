@@ -69,6 +69,8 @@ type Model struct {
 	groups         []api.Group
 	nodes          list.Model
 	curGroup       string // "" = group list shown; else members of this group
+	pendingGroup   string
+	pendingNode    string
 	nodeDelays     map[string]int
 	editingTestURL bool
 	testURLInput   textinput.Model
@@ -197,12 +199,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.setErr("API: " + msg.err.Error())
 			m.groups = nil
+			m.pendingGroup = ""
+			m.pendingNode = ""
 		} else {
 			m.groups = msg.groups
-			m.setStatus("loaded proxy groups")
+			if msg.note != "" {
+				m.setStatus(msg.note)
+			} else {
+				m.setStatus("loaded proxy groups")
+			}
 		}
-		m.curGroup = ""
-		m.showGroups()
+		m.openPendingGroupOrShowGroups()
 		return m, nil
 
 	case delayMsg:

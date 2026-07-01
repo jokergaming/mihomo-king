@@ -39,7 +39,7 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addStage = 1
 			m.nameInput.Reset()
 			m.urlInput.Reset()
-			m.urlInput.Placeholder = "vless://... or ss://..."
+			m.urlInput.Placeholder = "vless://, vmess://, ss://, trojan://, hy2://, socks5://, http://"
 			return m, m.urlInput.Focus()
 		case "u":
 			return m.updateSelectedSub()
@@ -172,8 +172,11 @@ func (m Model) activateSelectedSub() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if localName, ok := localNodeID(sel.id); ok {
-		m.setErr("local node " + localName + " is available in the Local group")
-		return m, nil
+		m.screen = screenNodes
+		m.pendingGroup = config.LocalGroupName
+		m.pendingNode = localName
+		m.setStatus("opening local node " + localName + "…")
+		return m, loadGroupsCmd(m.settings)
 	}
 	m.settings.Active = sel.id
 	if err := m.settings.Save(); err != nil {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -21,12 +22,20 @@ func ParseProxyLink(rawLink string) (map[string]any, error) {
 		return nil, err
 	}
 	switch strings.ToLower(u.Scheme) {
+	case "vmess":
+		return parseVMessLink(rawLink, u)
 	case "vless":
 		return parseVLESSLink(u)
 	case "ss":
 		return parseSSLink(rawLink, u)
 	case "trojan":
 		return parseTrojanLink(u)
+	case "hysteria2", "hy2":
+		return parseHysteria2Link(u)
+	case "socks", "socks5":
+		return parseSocksLink(u)
+	case "http", "https":
+		return parseHTTPProxyLink(u)
 	default:
 		return nil, fmt.Errorf("unsupported node link scheme %q", u.Scheme)
 	}
@@ -91,28 +100,70 @@ func parseVLESSLink(u *url.URL) (map[string]any, error) {
 	if flow := q.Get("flow"); flow != "" {
 		proxy["flow"] = flow
 	}
-	security := strings.ToLower(firstNonEmpty(q.Get("security"), q.Get("tls")))
-	if security == "tls" || security == "reality" || security == "true" || security == "1" {
+	applyURLTLS(proxy, q, false)
+	applyURLTransport(proxy, q)
+	return proxy, nil
+}
+
+func parseVMessLink(rawLink string, u *url.URL) (map[string]any, error) {
+	payload := strings.TrimPrefix(rawLink, u.Scheme+"://")
+	if i := strings.IndexAny(payload, "?#"); i >= 0 {
+		payload = payload[:i]
+	}
+	decoded, err := decodeBase64(payload)
+	if err != nil {
+		return nil, fmt.Errorf("decode vmess payload: %w", err)
+	}
+	var vm map[string]any
+	if err := json.Unmarshal([]byte(decoded), &vm); err != nil {
+		return nil, fmt.Errorf("decode vmess json: %w", err)
+	}
+	host := firstNonEmpty(str(vm["add"]), str(vm["server"]))
+	if host == "" {
+		return nil, fmt.Errorf("vmess link missing server")
+	}
+	port, err := intField(vm, "port")
+	if err != nil {
+		return nil, fmt.Errorf("vmess port: %w", err)
+	}
+	uuid := firstNonEmpty(str(vm["id"]), str(vm["uuid"]))
+	if uuid == "" {
+		return nil, fmt.Errorf("vmess link missing uuid")
+	}
+	name := firstNonEmpty(nodeName(u, ""), str(vm["ps"]), str(vm["name"]), "vmess-"+host)
+	proxy := map[string]any{
+		"name":   name,
+		"type":   "vmess",
+		"server": host,
+		"port":   port,
+		"uuid":   uuid,
+		"udp":    true,
+	}
+	if aid, err := intField(vm, "aid"); err == nil {
+		proxy["alterId"] = aid
+	}
+	if cipher := firstNonEmpty(str(vm["scy"]), str(vm["cipher"])); cipher != "" {
+		proxy["cipher"] = cipher
+	}
+	tls := strings.ToLower(firstNonEmpty(str(vm["tls"]), str(vm["security"])))
+	if tls == "tls" || tls == "true" || tls == "1" {
 		proxy["tls"] = true
 	}
-	if sni := firstNonEmpty(q.Get("sni"), q.Get("servername"), q.Get("peer")); sni != "" {
+	if sni := firstNonEmpty(str(vm["sni"]), str(vm["servername"])); sni != "" {
 		proxy["servername"] = sni
 	}
-	if fp := q.Get("fp"); fp != "" {
+	if fp := str(vm["fp"]); fp != "" {
 		proxy["client-fingerprint"] = fp
 	}
-	if insecure := q.Get("allowInsecure"); insecure == "1" || strings.EqualFold(insecure, "true") {
-		proxy["skip-cert-verify"] = true
-	}
-	network := strings.ToLower(firstNonEmpty(q.Get("type"), q.Get("network")))
+	network := strings.ToLower(str(vm["net"]))
 	switch network {
 	case "ws", "websocket":
 		proxy["network"] = "ws"
 		wsOpts := map[string]any{}
-		if path := q.Get("path"); path != "" {
+		if path := str(vm["path"]); path != "" {
 			wsOpts["path"] = path
 		}
-		if host := q.Get("host"); host != "" {
+		if host := str(vm["host"]); host != "" {
 			wsOpts["headers"] = map[string]any{"Host": host}
 		}
 		if len(wsOpts) > 0 {
@@ -120,7 +171,7 @@ func parseVLESSLink(u *url.URL) (map[string]any, error) {
 		}
 	case "grpc":
 		proxy["network"] = "grpc"
-		if service := firstNonEmpty(q.Get("serviceName"), q.Get("service_name")); service != "" {
+		if service := firstNonEmpty(str(vm["path"]), str(vm["serviceName"]), str(vm["service_name"])); service != "" {
 			proxy["grpc-opts"] = map[string]any{"grpc-service-name": service}
 		}
 	}
@@ -164,19 +215,107 @@ func parseTrojanLink(u *url.URL) (map[string]any, error) {
 		"password": u.User.Username(),
 		"udp":      true,
 	}
+	applyURLTLS(proxy, q, true)
+	network := strings.ToLower(firstNonEmpty(q.Get("type"), q.Get("network")))
+	switch network {
+	case "", "tcp":
+	default:
+		applyURLTransport(proxy, q)
+	}
+	return proxy, nil
+}
+
+func parseHysteria2Link(u *url.URL) (map[string]any, error) {
+	if u.User == nil || u.User.Username() == "" {
+		return nil, fmt.Errorf("hysteria2 link missing password")
+	}
+	host, port, err := splitHostPort(u)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	proxy := map[string]any{
+		"name":     nodeName(u, "hy2-"+host),
+		"type":     "hysteria2",
+		"server":   host,
+		"port":     port,
+		"password": u.User.Username(),
+		"udp":      true,
+		"tls":      true,
+	}
+	if sni := firstNonEmpty(q.Get("sni"), q.Get("servername"), q.Get("peer")); sni != "" {
+		proxy["sni"] = sni
+		proxy["servername"] = sni
+	}
+	if queryBool(q, "insecure", "allowInsecure", "skip-cert-verify") {
+		proxy["skip-cert-verify"] = true
+	}
+	if alpn := q.Get("alpn"); alpn != "" {
+		proxy["alpn"] = splitCSV(alpn)
+	}
+	if obfs := q.Get("obfs"); obfs != "" {
+		proxy["obfs"] = obfs
+	}
+	if obfsPassword := firstNonEmpty(q.Get("obfs-password"), q.Get("obfs_password"), q.Get("obfsPassword")); obfsPassword != "" {
+		proxy["obfs-password"] = obfsPassword
+	}
+	return proxy, nil
+}
+
+func parseSocksLink(u *url.URL) (map[string]any, error) {
+	host, port, err := splitHostPort(u)
+	if err != nil {
+		return nil, err
+	}
+	proxy := map[string]any{
+		"name":   nodeName(u, "socks-"+host),
+		"type":   "socks5",
+		"server": host,
+		"port":   port,
+		"udp":    true,
+	}
+	applyUserPass(proxy, u)
+	return proxy, nil
+}
+
+func parseHTTPProxyLink(u *url.URL) (map[string]any, error) {
+	host, port, err := splitHostPort(u)
+	if err != nil {
+		return nil, err
+	}
+	proxy := map[string]any{
+		"name":   nodeName(u, "http-"+host),
+		"type":   "http",
+		"server": host,
+		"port":   port,
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		proxy["tls"] = true
+	}
+	applyURLTLS(proxy, u.Query(), false)
+	applyUserPass(proxy, u)
+	return proxy, nil
+}
+
+func applyURLTLS(proxy map[string]any, q url.Values, defaultTLS bool) {
 	security := strings.ToLower(firstNonEmpty(q.Get("security"), q.Get("tls")))
-	if security == "" || security == "tls" || security == "true" || security == "1" {
+	if defaultTLS || security == "tls" || security == "reality" || security == "true" || security == "1" {
 		proxy["tls"] = true
 	}
 	if sni := firstNonEmpty(q.Get("sni"), q.Get("servername"), q.Get("peer")); sni != "" {
 		proxy["servername"] = sni
 	}
-	if insecure := q.Get("allowInsecure"); insecure == "1" || strings.EqualFold(insecure, "true") {
+	if fp := q.Get("fp"); fp != "" {
+		proxy["client-fingerprint"] = fp
+	}
+	if queryBool(q, "allowInsecure", "insecure", "skip-cert-verify") {
 		proxy["skip-cert-verify"] = true
 	}
+}
+
+func applyURLTransport(proxy map[string]any, q url.Values) {
 	network := strings.ToLower(firstNonEmpty(q.Get("type"), q.Get("network")))
 	switch network {
-	case "", "tcp":
 	case "ws", "websocket":
 		proxy["network"] = "ws"
 		wsOpts := map[string]any{}
@@ -195,7 +334,18 @@ func parseTrojanLink(u *url.URL) (map[string]any, error) {
 			proxy["grpc-opts"] = map[string]any{"grpc-service-name": service}
 		}
 	}
-	return proxy, nil
+}
+
+func applyUserPass(proxy map[string]any, u *url.URL) {
+	if u.User == nil {
+		return
+	}
+	if username := u.User.Username(); username != "" {
+		proxy["username"] = username
+	}
+	if password, ok := u.User.Password(); ok {
+		proxy["password"] = password
+	}
 }
 
 func ssParts(rawLink string, u *url.URL) (string, string, string, int, error) {
@@ -274,6 +424,25 @@ func nodeName(u *url.URL, fallback string) string {
 	return fallback
 }
 
+func intField(values map[string]any, key string) (int, error) {
+	switch v := values[key].(type) {
+	case int:
+		return v, nil
+	case int64:
+		return int(v), nil
+	case float64:
+		return int(v), nil
+	case string:
+		port, err := strconv.Atoi(v)
+		if err != nil {
+			return 0, err
+		}
+		return port, nil
+	default:
+		return 0, fmt.Errorf("missing %s", key)
+	}
+}
+
 func decodeBase64(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	encodings := []*base64.Encoding{
@@ -291,6 +460,27 @@ func decodeBase64(s string) (string, error) {
 		lastErr = err
 	}
 	return "", lastErr
+}
+
+func queryBool(q url.Values, keys ...string) bool {
+	for _, key := range keys {
+		value := q.Get(key)
+		if value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes") {
+			return true
+		}
+	}
+	return false
+}
+
+func splitCSV(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func mergeLocalGroup(root map[string]any, localNames []string) {

@@ -216,6 +216,40 @@ rules:
 	}
 }
 
+func TestSingBoxConfigPreservesLocalHysteria2Options(t *testing.T) {
+	s := &Settings{
+		ManagedTool: ToolSingBox,
+		Controller:  "127.0.0.1:9091",
+		Secret:      "sekret",
+		MixedPort:   7890,
+		Mode:        "rule",
+		LogLevel:    "info",
+		LocalNodes: []LocalNode{{
+			Name: "local-hy2",
+			Link: "hy2://secret@example.com:8443?sni=edge.example.com&insecure=1&alpn=h3,h2&obfs=salamander&obfs-password=obfs-pass#ignored",
+		}},
+	}
+	cfg, err := s.SingBoxConfig(nil)
+	if err != nil {
+		t.Fatalf("SingBoxConfig: %v", err)
+	}
+	outbound := findOutbound(cfg["outbounds"].([]map[string]any), "local-hy2")
+	if outbound == nil || outbound["type"] != "hysteria2" {
+		t.Fatalf("local hysteria2 outbound missing: %#v", cfg["outbounds"])
+	}
+	tls, ok := outbound["tls"].(map[string]any)
+	if !ok || tls["enabled"] != true || tls["server_name"] != "edge.example.com" || tls["insecure"] != true {
+		t.Fatalf("hysteria2 tls not converted: %#v", outbound["tls"])
+	}
+	if !sameStrings(tls["alpn"], []string{"h3", "h2"}) {
+		t.Fatalf("hysteria2 alpn not converted: %#v", tls["alpn"])
+	}
+	obfs, ok := outbound["obfs"].(map[string]any)
+	if !ok || obfs["type"] != "salamander" || obfs["password"] != "obfs-pass" {
+		t.Fatalf("hysteria2 obfs not converted: %#v", outbound["obfs"])
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

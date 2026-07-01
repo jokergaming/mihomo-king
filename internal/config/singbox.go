@@ -247,6 +247,13 @@ func clashProxyToSingBox(proxy map[string]any) (map[string]any, bool) {
 	case "hysteria2", "hy2":
 		out["type"] = "hysteria2"
 		copyString(out, proxy, "password")
+		if obfs := str(proxy["obfs"]); obfs != "" {
+			obfsConfig := map[string]any{"type": obfs}
+			if password := str(proxy["obfs-password"]); password != "" {
+				obfsConfig["password"] = password
+			}
+			out["obfs"] = obfsConfig
+		}
 	case "socks", "socks5":
 		out["type"] = "socks"
 		copyString(out, proxy, "username")
@@ -275,6 +282,9 @@ func copyTLS(dst, src map[string]any) {
 			"enabled":     true,
 			"fingerprint": fingerprint,
 		}
+	}
+	if alpn := stringList(src["alpn"]); len(alpn) > 0 {
+		tls["alpn"] = alpn
 	}
 	dst["tls"] = tls
 }
