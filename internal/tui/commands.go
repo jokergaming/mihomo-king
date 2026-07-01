@@ -209,6 +209,47 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 	}
 }
 
+func addLocalNodeCmd(s *config.Settings, rawLink string) tea.Cmd {
+	return func() tea.Msg {
+		node, err := s.AddLocalNode(rawLink)
+		if err != nil {
+			return actionMsg{err: err}
+		}
+		if err := s.Save(); err != nil {
+			return actionMsg{err: err}
+		}
+		if err := reloadRuntimeConfig(s); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{note: "added local node " + node.Name}
+	}
+}
+
+func reloadRuntimeConfigCmd(s *config.Settings, note string) tea.Cmd {
+	return func() tea.Msg {
+		if err := reloadRuntimeConfig(s); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{note: note}
+	}
+}
+
+func reloadRuntimeConfig(s *config.Settings) error {
+	if err := s.WriteActiveFromStore(); err != nil {
+		return err
+	}
+	if running, _ := mihomo.Running(s); running && s.Tool() == config.ToolMihomo {
+		if err := api.New(s.Controller, s.Secret).ReloadConfig(s.ConfigPath()); err != nil {
+			return fmt.Errorf("reload: %w", err)
+		}
+	} else if running {
+		if err := mihomo.Restart(s); err != nil {
+			return fmt.Errorf("restart: %w", err)
+		}
+	}
+	return nil
+}
+
 func loadGroupsCmd(s *config.Settings) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {

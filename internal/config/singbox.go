@@ -32,6 +32,9 @@ func (s *Settings) SingBoxConfig(subYAML []byte) (map[string]any, error) {
 			return nil, fmt.Errorf("parse subscription yaml: %w", err)
 		}
 	}
+	if err := s.applyLocalNodes(root); err != nil {
+		return nil, err
+	}
 
 	outbounds := []map[string]any{
 		{"type": "direct", "tag": "DIRECT"},
@@ -316,6 +319,9 @@ func anySlice(v any) []any {
 }
 
 func stringList(v any) []string {
+	if refs, ok := v.([]string); ok {
+		return refs
+	}
 	var out []string
 	for _, item := range anySlice(v) {
 		if s := str(item); s != "" {

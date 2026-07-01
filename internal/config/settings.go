@@ -24,6 +24,13 @@ type Subscription struct {
 	UserInfo  string `yaml:"user_info,omitempty"` // raw subscription-userinfo header
 }
 
+// LocalNode is a single node link pasted by the user. It is merged into the
+// runtime config under the Local proxy group.
+type LocalNode struct {
+	Name string `yaml:"name"`
+	Link string `yaml:"link"`
+}
+
 // Settings is the persisted application configuration.
 type Settings struct {
 	ManagedTool   string         `yaml:"managed_tool"`
@@ -42,6 +49,7 @@ type Settings struct {
 	TunAddress    string         `yaml:"tun_address"`
 	Active        string         `yaml:"active"` // active subscription name
 	Subscriptions []Subscription `yaml:"subscriptions"`
+	LocalNodes    []LocalNode    `yaml:"local_nodes,omitempty"`
 
 	appDir string // resolved at Load; not persisted
 }
@@ -169,6 +177,40 @@ func (s *Settings) RemoveSub(name string) {
 	if s.Active == name {
 		s.Active = ""
 	}
+}
+
+func (s *Settings) FindLocalNode(name string) (*LocalNode, int) {
+	for i := range s.LocalNodes {
+		if s.LocalNodes[i].Name == name {
+			return &s.LocalNodes[i], i
+		}
+	}
+	return nil, -1
+}
+
+func (s *Settings) AddLocalNode(rawLink string) (LocalNode, error) {
+	proxy, err := ParseProxyLink(rawLink)
+	if err != nil {
+		return LocalNode{}, err
+	}
+	node := LocalNode{Name: str(proxy["name"]), Link: strings.TrimSpace(rawLink)}
+	if node.Name == "" {
+		return LocalNode{}, fmt.Errorf("node name required")
+	}
+	if _, i := s.FindLocalNode(node.Name); i >= 0 {
+		s.LocalNodes[i] = node
+	} else {
+		s.LocalNodes = append(s.LocalNodes, node)
+	}
+	return node, nil
+}
+
+func (s *Settings) RemoveLocalNode(name string) bool {
+	if _, i := s.FindLocalNode(name); i >= 0 {
+		s.LocalNodes = append(s.LocalNodes[:i], s.LocalNodes[i+1:]...)
+		return true
+	}
+	return false
 }
 
 // ActiveYAML reads the active subscription's stored YAML body, or (nil, nil) if

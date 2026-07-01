@@ -18,6 +18,9 @@ func (s *Settings) MergeConfig(subYAML []byte) ([]byte, error) {
 			return nil, fmt.Errorf("parse subscription yaml: %w", err)
 		}
 	}
+	if err := s.applyLocalNodes(root); err != nil {
+		return nil, err
+	}
 
 	root["external-controller"] = s.Controller
 	root["secret"] = s.Secret

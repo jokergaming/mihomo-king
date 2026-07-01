@@ -42,9 +42,10 @@ func Start(s *config.Settings) error {
 		return err
 	}
 	// An empty active config (no proxies/groups) is never what the user wants;
-	// it leaves the runtime with only built-in GLOBAL/DIRECT.
-	if s.Active == "" {
-		return fmt.Errorf("no active subscription — press 2, pick one, press enter to activate, then start")
+	// it leaves the runtime with only built-in GLOBAL/DIRECT. Local nodes are
+	// enough to form a valid Local group without a remote subscription.
+	if s.Active == "" && len(s.LocalNodes) == 0 {
+		return fmt.Errorf("no active subscription or local node — press 2 to add one, then start")
 	}
 	// Our managed tool isn't running, so a taken controller port means another
 	// process owns it — starting would silently collide with it.

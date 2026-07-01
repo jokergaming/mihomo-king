@@ -177,6 +177,54 @@ proxy-groups:
 	}
 }
 
+func TestSingBoxConfigIncludesLocalNodes(t *testing.T) {
+	sub := []byte(`
+proxies:
+  - {name: n1, type: ss, server: example.com, port: 443, cipher: aes-128-gcm, password: pass}
+proxy-groups:
+  - {name: PROXY, type: select, proxies: [n1]}
+rules:
+  - MATCH,PROXY
+`)
+	s := &Settings{
+		ManagedTool: ToolSingBox,
+		Controller:  "127.0.0.1:9091",
+		Secret:      "sekret",
+		MixedPort:   7890,
+		Mode:        "rule",
+		LogLevel:    "info",
+		LocalNodes: []LocalNode{{
+			Name: "local-ss",
+			Link: "ss://YWVzLTI1Ni1nY206cGFzcw@local.example:8388#ignored",
+		}},
+	}
+	cfg, err := s.SingBoxConfig(sub)
+	if err != nil {
+		t.Fatalf("SingBoxConfig: %v", err)
+	}
+	outbounds := cfg["outbounds"].([]map[string]any)
+	if !hasOutbound(outbounds, "local-ss", "shadowsocks") {
+		t.Fatalf("local ss outbound missing: %#v", outbounds)
+	}
+	proxy := findOutbound(outbounds, "PROXY")
+	if proxy == nil || !containsString(anyStringList(proxy["outbounds"]), LocalGroupName) {
+		t.Fatalf("PROXY does not reference Local: %#v", proxy)
+	}
+	local := findOutbound(outbounds, LocalGroupName)
+	if local == nil || !sameStrings(local["outbounds"], []string{"local-ss"}) {
+		t.Fatalf("Local group not converted: %#v", local)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func hasOutbound(outbounds []map[string]any, tag, typ string) bool {
 	for _, outbound := range outbounds {
 		if outbound["tag"] == tag && outbound["type"] == typ {

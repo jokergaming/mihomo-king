@@ -110,3 +110,100 @@ proxies: []
 		t.Errorf("dns.enable not preserved")
 	}
 }
+
+func TestMergeConfigAddsLocalNodesWithoutReplacingRules(t *testing.T) {
+	sub := []byte(`
+proxies:
+  - {name: n1, type: ss, server: example.com, port: 443}
+proxy-groups:
+  - {name: PROXY, type: select, proxies: [n1]}
+rules:
+  - DOMAIN-SUFFIX,example.org,PROXY
+  - MATCH,DIRECT
+`)
+	s := &Settings{
+		Controller: "127.0.0.1:9091",
+		Secret:     "x",
+		MixedPort:  7890,
+		Mode:       "rule",
+		LogLevel:   "info",
+		LocalNodes: []LocalNode{{
+			Name: "local-ss",
+			Link: "ss://YWVzLTI1Ni1nY206cGFzcw@local.example:8388#ignored",
+		}},
+	}
+	out, err := s.MergeConfig(sub)
+	if err != nil {
+		t.Fatalf("MergeConfig: %v", err)
+	}
+	var got map[string]any
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("not valid yaml: %v", err)
+	}
+	if proxies := got["proxies"].([]any); len(proxies) != 2 {
+		t.Fatalf("proxies len = %d, want subscription + local", len(proxies))
+	}
+	groups := got["proxy-groups"].([]any)
+	proxyGroup := findYAMLGroup(groups, "PROXY")
+	if proxyGroup == nil {
+		t.Fatalf("PROXY group missing: %#v", groups)
+	}
+	if !stringListContains(stringList(proxyGroup["proxies"]), LocalGroupName) {
+		t.Fatalf("PROXY group does not include Local: %#v", proxyGroup["proxies"])
+	}
+	localGroup := findYAMLGroup(groups, LocalGroupName)
+	if localGroup == nil {
+		t.Fatalf("Local group missing: %#v", groups)
+	}
+	if got := stringList(localGroup["proxies"]); len(got) != 1 || got[0] != "local-ss" {
+		t.Fatalf("Local proxies = %#v, want local-ss", got)
+	}
+	if rules := got["rules"].([]any); len(rules) != 2 {
+		t.Fatalf("rules len = %d, want original rules preserved", len(rules))
+	}
+}
+
+func TestMergeConfigLocalOnlyAddsMatchRule(t *testing.T) {
+	s := &Settings{
+		Controller: "127.0.0.1:9091",
+		Secret:     "x",
+		MixedPort:  7890,
+		Mode:       "rule",
+		LogLevel:   "info",
+		LocalNodes: []LocalNode{{
+			Name: "local-ss",
+			Link: "ss://YWVzLTI1Ni1nY206cGFzcw@local.example:8388#ignored",
+		}},
+	}
+	out, err := s.MergeConfig(nil)
+	if err != nil {
+		t.Fatalf("MergeConfig: %v", err)
+	}
+	var got map[string]any
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatalf("not valid yaml: %v", err)
+	}
+	rules := got["rules"].([]any)
+	if len(rules) != 1 || rules[0] != "MATCH,Local" {
+		t.Fatalf("rules = %#v, want MATCH,Local", rules)
+	}
+}
+
+func findYAMLGroup(groups []any, name string) map[string]any {
+	for _, item := range groups {
+		group, ok := item.(map[string]any)
+		if ok && group["name"] == name {
+			return group
+		}
+	}
+	return nil
+}
+
+func stringListContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}

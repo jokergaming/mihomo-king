@@ -60,6 +60,7 @@ type Model struct {
 	// subscriptions
 	subs      list.Model
 	adding    bool
+	addLocal  bool
 	addStage  int // 0 = name, 1 = url
 	nameInput textinput.Model
 	urlInput  textinput.Model
@@ -172,6 +173,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setErr(msg.err.Error())
 		} else {
 			m.setStatus(msg.note)
+		}
+		if m.screen == screenSubs {
+			m.reloadSubs()
 		}
 		return m, refreshStatusCmd(m.settings)
 
@@ -324,7 +328,7 @@ func (m Model) help() string {
 		if m.subs.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "a add · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
+		return "a add sub · n add node · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
 	case screenNodes:
 		if m.editingTestURL {
 			return "enter save url · esc cancel"
@@ -389,7 +393,7 @@ func wrapListKey(l *list.Model, key string) bool {
 }
 
 func (m *Model) reloadSubs() {
-	items := make([]list.Item, 0, len(m.settings.Subscriptions))
+	items := make([]list.Item, 0, len(m.settings.Subscriptions)+len(m.settings.LocalNodes))
 	for _, sub := range m.settings.Subscriptions {
 		desc := sub.URL
 		if info := subscription.FormatUserInfo(sub.UserInfo); info != "" {
@@ -400,6 +404,13 @@ func (m *Model) reloadSubs() {
 			title = "● " + sub.Name + " (active)"
 		}
 		items = append(items, item{title: title, desc: desc, id: sub.Name})
+	}
+	for _, node := range m.settings.LocalNodes {
+		items = append(items, item{
+			title: "Local / " + node.Name,
+			desc:  "local node · " + node.Link,
+			id:    "local:" + node.Name,
+		})
 	}
 	m.subs.SetItems(items)
 }
