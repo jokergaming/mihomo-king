@@ -154,4 +154,6 @@ root model with a `screen`/state enum that delegates `Update`/`View` to the acti
   `~/.bin/apps/clash_gui/data/mihomo`): controller `127.0.0.1:9090` (with secret), proxy ports
   8899/6152/6153, TUN device `Meta`. Don't touch it — see the isolation notes above.
 - `~/.config/mihomo/` is mihomo-king's data dir (`cache.db`, `geoip.metadb`); the merged active
-  config is written there as `config.yaml`.
+  config is written there as `config.yaml`. Its `GeoSite.dat` must be MetaCubeX's `geosite.dat`
+  (v2fly's `dlc.dat` lacks `gfw`, which several subscriptions use in `dns.fallback-filter`).
+  Subscription switches and starts are validated with `mihomo -t` first (`mihomo.CheckActive`).

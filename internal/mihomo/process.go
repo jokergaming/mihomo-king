@@ -3,6 +3,8 @@
 package mihomo
 
 import (
+	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -55,6 +57,9 @@ func Start(s *config.Settings) error {
 	if err := s.WriteActiveFromStore(); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
+	if err := CheckConfig(s, s.ConfigPath()); err != nil {
+		return err
+	}
 
 	logf, err := os.OpenFile(s.LogFile(), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
@@ -80,6 +85,86 @@ func Start(s *config.Settings) error {
 		return fmt.Errorf("%s controller was not ready: %w; see %s", s.ToolLabel(), err, s.LogFile())
 	}
 	return nil
+}
+
+// CheckActive validates the runtime config the active subscription would
+// produce, without touching the config the runtime is using.
+func CheckActive(s *config.Settings) error {
+	if s.Tool() != config.ToolMihomo {
+		return nil
+	}
+	body, err := s.ActiveYAML()
+	if err != nil {
+		return err
+	}
+	merged, err := s.MergeConfig(body)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(s.RuntimeDir(), 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(s.RuntimeDir(), ".mihomo-king-check-*.yaml")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.Write(merged)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return CheckConfig(s, f.Name())
+}
+
+// CheckConfig validates a mihomo config file with `mihomo -t` against the data
+// dir, so a config the runtime would reject (e.g. a GeoSite list missing from
+// GeoSite.dat) is caught before it replaces a working one. sing-box configs
+// are not checked.
+func CheckConfig(s *config.Settings, path string) error {
+	if s.Tool() != config.ToolMihomo {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, s.Binary(), "-t", "-d", s.RuntimeDir(), "-f", path).CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("config check timed out")
+	}
+	msg := checkFailure(string(out))
+	if strings.Contains(msg, "GeoSite.dat") {
+		msg += fmt.Sprintf(" (replace %s with MetaCubeX geosite.dat)", filepath.Join(s.RuntimeDir(), "GeoSite.dat"))
+	}
+	return fmt.Errorf("config rejected: %s", msg)
+}
+
+// checkFailure extracts the reason from `mihomo -t` output: the msg of the
+// last error/fatal log line, else the last output line.
+func checkFailure(out string) string {
+	var last, reason string
+	for line := range strings.Lines(out) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		last = line
+		if !strings.Contains(line, "level=error") && !strings.Contains(line, "level=fatal") {
+			continue
+		}
+		if _, quoted, ok := strings.Cut(line, "msg="); ok {
+			if msg, err := strconv.Unquote(quoted); err == nil {
+				reason = msg
+			} else {
+				reason = quoted
+			}
+		}
+	}
+	return cmp.Or(reason, last, "unknown error")
 }
 
 // Stop terminates the tracked process group.

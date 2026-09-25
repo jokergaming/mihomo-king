@@ -190,6 +190,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, refreshStatusCmd(m.settings)
 
+	case subSwitchedMsg:
+		if msg.err != nil {
+			m.setErr(msg.err.Error())
+		} else {
+			m.settings.Active = msg.name
+			if err := m.settings.Save(); err != nil {
+				m.setErr(err.Error())
+			} else {
+				m.setStatus("switched to " + msg.name)
+			}
+		}
+		m.reloadSubs()
+		return m, refreshStatusCmd(m.settings)
+
 	case subDownloadedMsg:
 		if msg.err != nil {
 			m.setErr(msg.err.Error())

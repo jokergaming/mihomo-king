@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"time"
@@ -45,6 +46,11 @@ type pathCompletionMsg struct {
 
 type actionMsg struct {
 	note string
+	err  error
+}
+
+type subSwitchedMsg struct {
+	name string
 	err  error
 }
 
@@ -179,23 +185,25 @@ func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd
 	}
 }
 
-// switchSubCmd assumes s.Active has already been set and saved.
-func switchSubCmd(s *config.Settings) tea.Cmd {
-	controller, secret, active := s.Controller, s.Secret, s.Active
+// switchSubCmd makes subscription name active. Its config is validated first,
+// and if the runtime still rejects it the previous subscription's config is
+// restored, so a broken subscription never replaces a working one. s.Active
+// is only updated (by the subSwitchedMsg handler) once the switch succeeded.
+func switchSubCmd(s *config.Settings, name string) tea.Cmd {
+	next := *s
+	next.Active = name
 	return func() tea.Msg {
-		if err := s.WriteActiveFromStore(); err != nil {
-			return actionMsg{err: err}
+		if err := mihomo.CheckActive(&next); err != nil {
+			return subSwitchedMsg{name: name, err: fmt.Errorf("%s not activated: %w", name, err)}
 		}
-		if running, _ := mihomo.Running(s); running && s.Tool() == config.ToolMihomo {
-			if err := api.New(controller, secret).ReloadConfig(s.ConfigPath()); err != nil {
-				return actionMsg{err: fmt.Errorf("reload: %w", err)}
+		if err := reloadRuntimeConfig(&next); err != nil {
+			err = fmt.Errorf("%s not activated: %w", name, err)
+			if restoreErr := reloadRuntimeConfig(s); restoreErr != nil {
+				err = fmt.Errorf("%w; restoring %s also failed: %v", err, cmp.Or(s.Active, "previous config"), restoreErr)
 			}
-		} else if running {
-			if err := mihomo.Restart(s); err != nil {
-				return actionMsg{err: fmt.Errorf("restart: %w", err)}
-			}
+			return subSwitchedMsg{name: name, err: err}
 		}
-		return actionMsg{note: "switched to " + active}
+		return subSwitchedMsg{name: name}
 	}
 }
 

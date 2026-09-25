@@ -237,14 +237,8 @@ func (m Model) activateSelectedSub() (tea.Model, tea.Cmd) {
 		m.setStatus("opening local node " + localName + "…")
 		return m, loadGroupsCmd(m.settings)
 	}
-	m.settings.Active = sel.id
-	if err := m.settings.Save(); err != nil {
-		m.setErr(err.Error())
-		return m, nil
-	}
-	m.reloadSubs()
 	m.setStatus("activating " + sel.id + "…")
-	return m, switchSubCmd(m.settings)
+	return m, switchSubCmd(m.settings, sel.id)
 }
 
 func (m Model) viewSubs() string {
