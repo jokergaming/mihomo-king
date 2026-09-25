@@ -250,6 +250,40 @@ func TestSingBoxConfigPreservesLocalHysteria2Options(t *testing.T) {
 	}
 }
 
+func TestSingBoxConfigConvertsReality(t *testing.T) {
+	sub := []byte(`
+proxies:
+  - {name: r1, type: vless, server: example.com, port: 443, uuid: 7e550ef0-9601-4968-8d8e-103fab975c5d, flow: xtls-rprx-vision, tls: true, servername: www.microsoft.com, client-fingerprint: ios, reality-opts: {public-key: PUBKEY, short-id: 6ba85179}}
+  - {name: r2, type: vless, server: example.com, port: 443, uuid: 7e550ef0-9601-4968-8d8e-103fab975c5d, tls: true, servername: www.microsoft.com, reality-opts: {public-key: PUBKEY}}
+proxy-groups:
+  - {name: PROXY, type: select, proxies: [r1, r2]}
+`)
+	s := &Settings{ManagedTool: ToolSingBox, Controller: "127.0.0.1:9091", Secret: "x", MixedPort: 7890, Mode: "rule", LogLevel: "info"}
+	cfg, err := s.SingBoxConfig(sub)
+	if err != nil {
+		t.Fatalf("SingBoxConfig: %v", err)
+	}
+	outbounds := cfg["outbounds"].([]map[string]any)
+	for tag, fingerprint := range map[string]string{"r1": "ios", "r2": "chrome"} {
+		outbound := findOutbound(outbounds, tag)
+		if outbound == nil {
+			t.Fatalf("outbound %s missing: %#v", tag, outbounds)
+		}
+		tls := outbound["tls"].(map[string]any)
+		reality, ok := tls["reality"].(map[string]any)
+		if !ok || reality["enabled"] != true || reality["public_key"] != "PUBKEY" {
+			t.Fatalf("%s reality = %#v", tag, tls["reality"])
+		}
+		utls, ok := tls["utls"].(map[string]any)
+		if !ok || utls["enabled"] != true || utls["fingerprint"] != fingerprint {
+			t.Fatalf("%s utls = %#v, want fingerprint %s", tag, tls["utls"], fingerprint)
+		}
+	}
+	if reality := findOutbound(outbounds, "r1")["tls"].(map[string]any)["reality"].(map[string]any); reality["short_id"] != "6ba85179" {
+		t.Fatalf("r1 short_id = %v, want 6ba85179", reality["short_id"])
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {

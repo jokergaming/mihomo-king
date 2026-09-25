@@ -286,6 +286,17 @@ func copyTLS(dst, src map[string]any) {
 	if alpn := stringList(src["alpn"]); len(alpn) > 0 {
 		tls["alpn"] = alpn
 	}
+	if reality, ok := src["reality-opts"].(map[string]any); ok {
+		tls["reality"] = map[string]any{
+			"enabled":    true,
+			"public_key": str(reality["public-key"]),
+			"short_id":   str(reality["short-id"]),
+		}
+		if tls["utls"] == nil {
+			// sing-box only speaks REALITY over uTLS.
+			tls["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
+		}
+	}
 	dst["tls"] = tls
 }
 

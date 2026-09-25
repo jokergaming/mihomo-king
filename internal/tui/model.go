@@ -33,6 +33,16 @@ const (
 	tunAskPassword          // sudo password needed (delete foreign TUN or setcap)
 )
 
+// addForm is the input form open on the subscriptions screen, if any.
+type addForm int
+
+const (
+	addNone addForm = iota
+	addSub          // name, then url
+	addNode         // node link
+	addFile         // file path, then name
+)
+
 // Model is the root Bubble Tea model.
 type Model struct {
 	settings  *config.Settings
@@ -59,11 +69,10 @@ type Model struct {
 
 	// subscriptions
 	subs      list.Model
-	adding    bool
-	addLocal  bool
-	addStage  int // 0 = name, 1 = url
+	addForm   addForm
+	addStage  int // field of the open form being edited: 0 = first, 1 = second
 	nameInput textinput.Model
-	urlInput  textinput.Model
+	urlInput  textinput.Model // url, node link or file path
 
 	// nodes
 	groups         []api.Group
@@ -190,9 +199,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err := m.settings.Save(); err != nil {
 			m.setErr(err.Error())
 		} else {
-			m.setStatus("downloaded " + msg.sub.Name)
+			m.setStatus(msg.note)
 		}
 		m.reloadSubs()
+		return m, nil
+
+	case pathCompletionMsg:
+		if m.addForm != addFile || m.addStage != 0 || m.urlInput.Value() != msg.input {
+			return m, nil // the user kept typing or left the form
+		}
+		m.urlInput.SetValue(msg.value)
+		m.urlInput.CursorEnd()
+		switch len(msg.matches) {
+		case 0:
+			m.setStatus("no matching files")
+		case 1:
+			m.setStatus("")
+		default:
+			m.setStatus(matchList(msg.matches))
+		}
 		return m, nil
 
 	case groupsMsg:
@@ -329,13 +354,16 @@ func (m Model) footer() string {
 func (m Model) help() string {
 	switch m.screen {
 	case screenSubs:
-		if m.adding {
+		switch {
+		case m.addForm == addFile && m.addStage == 0:
+			return "tab complete path · enter next · esc cancel"
+		case m.addForm != addNone:
 			return "enter confirm · esc cancel"
 		}
 		if m.subs.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "a add sub · n add node · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
+		return "a add sub · i import file · n add node · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
 	case screenNodes:
 		if m.editingTestURL {
 			return "enter save url · esc cancel"
@@ -402,9 +430,13 @@ func wrapListKey(l *list.Model, key string) bool {
 func (m *Model) reloadSubs() {
 	items := make([]list.Item, 0, len(m.settings.Subscriptions)+len(m.settings.LocalNodes))
 	for _, sub := range m.settings.Subscriptions {
-		desc := sub.URL
+		source := sub.URL
+		if sub.Path != "" {
+			source = "file · " + sub.Path
+		}
+		desc := source
 		if info := subscription.FormatUserInfo(sub.UserInfo); info != "" {
-			desc = info + "  ·  " + sub.URL
+			desc = info + "  ·  " + source
 		}
 		title := sub.Name
 		if sub.Name == m.settings.Active {

@@ -39,6 +39,23 @@ func TestParseSSLink(t *testing.T) {
 	}
 }
 
+func TestParseVLESSRealityLink(t *testing.T) {
+	proxy, err := ParseProxyLink("vless://7e550ef0-9601-4968-8d8e-103fab975c5d@example.com:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=www.microsoft.com&pbk=PUBKEY&sid=6ba85179&type=tcp#reality")
+	if err != nil {
+		t.Fatalf("ParseProxyLink: %v", err)
+	}
+	if proxy["tls"] != true || proxy["servername"] != "www.microsoft.com" || proxy["flow"] != "xtls-rprx-vision" {
+		t.Fatalf("vless reality tls fields not parsed: %#v", proxy)
+	}
+	reality, ok := proxy["reality-opts"].(map[string]any)
+	if !ok || reality["public-key"] != "PUBKEY" || reality["short-id"] != "6ba85179" {
+		t.Fatalf("reality-opts = %#v, want public-key and short-id", proxy["reality-opts"])
+	}
+	if proxy["client-fingerprint"] != "chrome" {
+		t.Fatalf("client-fingerprint = %v, want chrome default for reality", proxy["client-fingerprint"])
+	}
+}
+
 func TestParseVMessLink(t *testing.T) {
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{
 		"v":"2",

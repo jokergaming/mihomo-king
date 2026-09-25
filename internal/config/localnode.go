@@ -311,6 +311,20 @@ func applyURLTLS(proxy map[string]any, q url.Values, defaultTLS bool) {
 	if queryBool(q, "allowInsecure", "insecure", "skip-cert-verify") {
 		proxy["skip-cert-verify"] = true
 	}
+	if security == "reality" {
+		reality := map[string]any{}
+		if pbk := q.Get("pbk"); pbk != "" {
+			reality["public-key"] = pbk
+		}
+		if sid := q.Get("sid"); sid != "" {
+			reality["short-id"] = sid
+		}
+		proxy["reality-opts"] = reality
+		if proxy["client-fingerprint"] == nil {
+			// REALITY runs over uTLS, so it needs a fingerprint even when the link has none.
+			proxy["client-fingerprint"] = "chrome"
+		}
+	}
 }
 
 func applyURLTransport(proxy map[string]any, q url.Values) {

@@ -6,7 +6,9 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Features
 
-- Download and store subscriptions (Clash/mihomo YAML).
+- Download subscriptions or import them from local files: Clash/mihomo YAML,
+  base64 node lists, or node links one per line.
+- Add local nodes from share links (vmess, vless, ss, trojan, hysteria2, socks5, http).
 - Switch the active subscription and reload the managed core.
 - Manage either mihomo or sing-box from the settings screen.
 - Convert Clash/mihomo subscriptions into sing-box runtime config.

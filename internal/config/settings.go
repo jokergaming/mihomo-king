@@ -16,10 +16,12 @@ import (
 )
 
 // Subscription is a stored subscription's metadata. Its YAML body lives on disk
-// at <appdir>/subscriptions/<Name>.yaml.
+// at <appdir>/subscriptions/<Name>.yaml. Updating re-downloads URL, or re-reads
+// Path for a subscription imported from a local file.
 type Subscription struct {
 	Name      string `yaml:"name"`
-	URL       string `yaml:"url"`
+	URL       string `yaml:"url,omitempty"`
+	Path      string `yaml:"path,omitempty"`
 	UpdatedAt string `yaml:"updated_at,omitempty"`
 	UserInfo  string `yaml:"user_info,omitempty"` // raw subscription-userinfo header
 }

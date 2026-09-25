@@ -32,8 +32,15 @@ type groupsMsg struct {
 }
 
 type subDownloadedMsg struct {
-	sub config.Subscription
-	err error
+	sub  config.Subscription
+	note string
+	err  error
+}
+
+type pathCompletionMsg struct {
+	input   string   // path input the completion was computed for
+	value   string   // completed input
+	matches []string // entries matching the last path element
 }
 
 type actionMsg struct {
@@ -201,12 +208,55 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 		if err := subscription.Store(dest, res.Body); err != nil {
 			return subDownloadedMsg{err: err}
 		}
-		return subDownloadedMsg{sub: config.Subscription{
-			Name:      name,
-			URL:       rawURL,
-			UpdatedAt: time.Now().Format("2006-01-02 15:04"),
-			UserInfo:  res.UserInfo,
-		}}
+		return subDownloadedMsg{
+			sub: config.Subscription{
+				Name:      name,
+				URL:       rawURL,
+				UpdatedAt: time.Now().Format("2006-01-02 15:04"),
+				UserInfo:  res.UserInfo,
+			},
+			note: fetchedNote("downloaded "+name, res),
+		}
+	}
+}
+
+// importFileCmd stores a subscription read from a local file. The resolved
+// absolute path is kept so 'u' can re-read the file later.
+func importFileCmd(name, rawPath, dest string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := subscription.ResolvePath(rawPath)
+		if err != nil {
+			return subDownloadedMsg{err: err}
+		}
+		res, err := subscription.ReadFile(path)
+		if err != nil {
+			return subDownloadedMsg{err: err}
+		}
+		if err := subscription.Store(dest, res.Body); err != nil {
+			return subDownloadedMsg{err: err}
+		}
+		return subDownloadedMsg{
+			sub: config.Subscription{
+				Name:      name,
+				Path:      path,
+				UpdatedAt: time.Now().Format("2006-01-02 15:04"),
+			},
+			note: fetchedNote("imported "+name, res),
+		}
+	}
+}
+
+func fetchedNote(done string, res *subscription.Result) string {
+	if summary := res.Summary(); summary != "" {
+		return done + " · " + summary
+	}
+	return done
+}
+
+func completePathCmd(input string) tea.Cmd {
+	return func() tea.Msg {
+		value, matches := completePath(input)
+		return pathCompletionMsg{input: input, value: value, matches: matches}
 	}
 }
 
