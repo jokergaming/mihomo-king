@@ -19,8 +19,44 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 ## Build & run
 
 ```bash
-go build -o mihomo-king .
-./mihomo-king
+make build          # or: go build -o mihomo-king .
+./mihomo-king       # no arguments: open the TUI
+make install        # binary to ~/.local/bin, bash/zsh completions to ~/.local/share
+```
+
+## Command line
+
+Every common TUI action is also a subcommand (built with
+[cobra](https://github.com/spf13/cobra)); `mihomo-king <command> --help` shows details.
+
+```text
+Information:  status [--json] · version · paths [settings|subs|dir|config|log|pid|bin]
+              subs [--urls] · check [sub] · log [-n N] [-f]
+Control:      start · stop · restart · use <sub> · update [--all] [--apply] [sub...]
+              tun [on|off|toggle] [--force] · mode [rule|global|direct]
+Proxies:      groups [-s] · nodes <group> · select <group> <node>
+              delay [--url URL] [--timeout 5s] <group|node> [node]
+```
+
+```bash
+mihomo-king -v                        # version (also: mihomo-king version for build + core info)
+mihomo-king status
+mihomo-king use provider-a            # validated with mihomo -t, rolled back if the reload fails
+mihomo-king select Proxy "HK 02"
+mihomo-king delay Proxy              # every member, fastest first
+tail -f "$(mihomo-king paths log)"
+```
+
+### Shell completion
+
+Completion covers commands, flags, and live values: subscription names, proxy
+groups and their nodes (queried from the running core).
+
+```bash
+# bash
+mihomo-king completion bash > ~/.local/share/bash-completion/completions/mihomo-king
+# zsh (the directory must be on $fpath before compinit)
+mihomo-king completion zsh > "${fpath[1]}/_mihomo-king"
 ```
 
 ## Release

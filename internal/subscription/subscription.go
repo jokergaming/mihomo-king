@@ -55,6 +55,10 @@ func Download(rawURL string) (*Result, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
+		// The URL usually carries an access token; name only the host.
+		if uerr, ok := err.(*url.Error); ok {
+			uerr.URL = req.URL.Host
+		}
 		return nil, err
 	}
 	defer resp.Body.Close()

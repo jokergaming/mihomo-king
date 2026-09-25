@@ -279,3 +279,10 @@ func stringsOf(v any) []string {
 	}
 	return out
 }
+
+func TestDownloadErrorHidesToken(t *testing.T) {
+	_, err := Download("http://127.0.0.1:1/sub?token=secret")
+	if err == nil || strings.Contains(err.Error(), "secret") || !strings.Contains(err.Error(), "127.0.0.1:1") {
+		t.Fatalf("Download error = %v", err)
+	}
+}

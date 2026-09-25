@@ -52,7 +52,7 @@ jobs:
         run: |
           mkdir -p dist
           binary="mihomo-king-${GOOS}-${GOARCH}"
-          go build -trimpath -ldflags="-s -w" -o "dist/${binary}" .
+          go build -trimpath -ldflags="-s -w -X mihomo-king/internal/cli.Version=${GITHUB_REF_NAME}" -o "dist/${binary}" .
           tar -C dist -czf "dist/${binary}.tar.gz" "${binary}"
           sha256sum "dist/${binary}.tar.gz" > "dist/${binary}.tar.gz.sha256"
 

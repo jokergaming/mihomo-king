@@ -181,6 +181,11 @@ func (c *Client) SetTun(enable bool) error {
 	return err
 }
 
+// SetMode switches the routing mode (rule/global/direct) live.
+func (c *Client) SetMode(mode string) error {
+	return c.send(http.MethodPatch, "/configs", map[string]string{"mode": mode})
+}
+
 // ReloadConfig reloads mihomo from a config file path (PUT /configs?force=true).
 // force=true also re-fetches providers over the network, so allow it time.
 func (c *Client) ReloadConfig(path string) error {

@@ -38,7 +38,12 @@ go test ./...                    # all tests
 go test ./internal/config/ -run TestMerge -v   # single test
 go vet ./...                     # vet
 gofmt -w . && go mod tidy        # format + tidy deps
+make build / make install        # build with version from git describe; install binary + completions
 ```
+
+CLI and TUI share the actions in `internal/mihomo/control.go` (`SwitchSub`, `Reload`,
+`ApplyTun`, `ApplyMode`) — add new behavior there, not in either front end. CLI output must
+never print full subscription URLs by default (they carry tokens).
 
 TUI debugging: stdout is the rendered UI, so `fmt.Println` is useless and `log` corrupts the
 screen. Use `tea.LogToFile("debug.log", "")` (set `BUBBLETEA_LOG` or a flag to enable) and
@@ -125,8 +130,9 @@ mihomo is always launched with its data dir so caches/GeoIP resolve:
 ## Suggested package layout (keep flat & simple)
 
 ```
-main.go                  # entry: load settings, construct root model, tea.NewProgram(...).Run()
+main.go                  # entry: cli.Execute()
 internal/
+  cli/                   # cobra command tree: no args → TUI; subcommands mirror TUI actions; completion
   tui/                   # Bubble Tea: root model + screen switching, per-screen models, lipgloss styles
   api/                   # mihomo RESTful client (version, configs, proxies, delay)
   subscription/          # download + parse + store subscriptions; subscription-userinfo parsing

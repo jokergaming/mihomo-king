@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"time"
@@ -117,19 +116,10 @@ func stopCmd(s *config.Settings) tea.Cmd {
 
 // toggleTunCmd assumes s.TunEnable has already been flipped and saved.
 func toggleTunCmd(s *config.Settings) tea.Cmd {
-	controller, secret, want := s.Controller, s.Secret, s.TunEnable
+	want := s.TunEnable
 	return func() tea.Msg {
-		if err := s.WriteActiveFromStore(); err != nil {
+		if err := mihomo.ApplyTun(s); err != nil {
 			return actionMsg{err: err}
-		}
-		if running, _ := mihomo.Running(s); running && s.Tool() == config.ToolMihomo {
-			if err := api.New(controller, secret).SetTun(want); err != nil {
-				return actionMsg{err: fmt.Errorf("tun live toggle: %w", err)}
-			}
-		} else if running {
-			if err := mihomo.Restart(s); err != nil {
-				return actionMsg{err: fmt.Errorf("restart for tun change: %w", err)}
-			}
 		}
 		if want {
 			return actionMsg{note: "TUN on"}
@@ -142,7 +132,6 @@ func toggleTunCmd(s *config.Settings) tea.Cmd {
 // foreign TUN device, granting net caps), then enables it. The password stays
 // in this closure and is never persisted or logged.
 func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd {
-	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		for _, dev := range delDevs {
 			if err := mihomo.DeleteTunDevice(password, dev); err != nil {
@@ -163,47 +152,22 @@ func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd
 		if err := s.Save(); err != nil {
 			return actionMsg{err: err}
 		}
-		if err := s.WriteActiveFromStore(); err != nil {
-			return actionMsg{err: err}
-		}
-		running, _ := mihomo.Running(s)
-		switch {
-		case running && needRestart:
+		if running, _ := mihomo.Running(s); running && needRestart {
 			if err := mihomo.Restart(s); err != nil {
 				return actionMsg{err: fmt.Errorf("restart after setcap: %v", err)}
 			}
-		case running && s.Tool() == config.ToolMihomo:
-			if err := api.New(controller, secret).SetTun(true); err != nil {
-				return actionMsg{err: fmt.Errorf("tun live toggle: %w", err)}
-			}
-		case running:
-			if err := mihomo.Restart(s); err != nil {
-				return actionMsg{err: fmt.Errorf("restart for tun change: %v", err)}
-			}
+		} else if err := mihomo.ApplyTun(s); err != nil {
+			return actionMsg{err: err}
 		}
 		return actionMsg{note: "TUN on"}
 	}
 }
 
-// switchSubCmd makes subscription name active. Its config is validated first,
-// and if the runtime still rejects it the previous subscription's config is
-// restored, so a broken subscription never replaces a working one. s.Active
+// switchSubCmd makes subscription name active; see mihomo.SwitchSub. s.Active
 // is only updated (by the subSwitchedMsg handler) once the switch succeeded.
 func switchSubCmd(s *config.Settings, name string) tea.Cmd {
-	next := *s
-	next.Active = name
 	return func() tea.Msg {
-		if err := mihomo.CheckActive(&next); err != nil {
-			return subSwitchedMsg{name: name, err: fmt.Errorf("%s not activated: %w", name, err)}
-		}
-		if err := reloadRuntimeConfig(&next); err != nil {
-			err = fmt.Errorf("%s not activated: %w", name, err)
-			if restoreErr := reloadRuntimeConfig(s); restoreErr != nil {
-				err = fmt.Errorf("%w; restoring %s also failed: %v", err, cmp.Or(s.Active, "previous config"), restoreErr)
-			}
-			return subSwitchedMsg{name: name, err: err}
-		}
-		return subSwitchedMsg{name: name}
+		return subSwitchedMsg{name: name, err: mihomo.SwitchSub(s, name)}
 	}
 }
 
@@ -294,19 +258,7 @@ func reloadRuntimeConfigCmd(s *config.Settings, note string) tea.Cmd {
 }
 
 func reloadRuntimeConfig(s *config.Settings) error {
-	if err := s.WriteActiveFromStore(); err != nil {
-		return err
-	}
-	if running, _ := mihomo.Running(s); running && s.Tool() == config.ToolMihomo {
-		if err := api.New(s.Controller, s.Secret).ReloadConfig(s.ConfigPath()); err != nil {
-			return fmt.Errorf("reload: %w", err)
-		}
-	} else if running {
-		if err := mihomo.Restart(s); err != nil {
-			return fmt.Errorf("restart: %w", err)
-		}
-	}
-	return nil
+	return mihomo.Reload(s)
 }
 
 func loadGroupsCmd(s *config.Settings) tea.Cmd {
