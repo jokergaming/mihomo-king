@@ -2,21 +2,77 @@ name: release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, for example v0.1.0"
-        required: true
+        description: "Existing version tag to rebuild; leave blank for nightly"
+        required: false
         type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' && !inputs.tag }}
+
 jobs:
+  prepare:
+    name: resolve release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      sha: ${{ steps.meta.outputs.sha }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+
+      - name: Resolve release metadata
+        id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == tag ]]; then
+            tag="${GITHUB_REF_NAME}"
+          elif [[ -n "${INPUT_TAG}" ]]; then
+            tag="${INPUT_TAG}"
+          else
+            tag=nightly
+          fi
+
+          if [[ "${INPUT_TAG}" == nightly ]]; then
+            echo "Leave the tag input blank for nightly" >&2
+            exit 1
+          fi
+          if [[ "${tag}" == nightly ]]; then
+            if [[ "${GITHUB_REF}" != refs/heads/main ]]; then
+              echo "Nightly builds must run from main" >&2
+              exit 1
+            fi
+          elif [[ ! "${tag}" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Invalid version tag: ${tag}" >&2
+            exit 1
+          fi
+
+          sha="$(git rev-parse HEAD)"
+          version="${tag}"
+          if [[ "${tag}" == nightly ]]; then
+            version="nightly-${sha:0:7}"
+          fi
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
   build:
     name: build ${{ matrix.goos }} ${{ matrix.goarch }} ${{ matrix.libc }}
+    needs: prepare
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -50,6 +106,8 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -65,7 +123,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           LIBC: ${{ matrix.libc }}
-          VERSION: ${{ inputs.tag || github.ref_name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           mkdir -p dist
           suffix=""
@@ -118,7 +176,7 @@ jobs:
 
   release:
     name: publish release
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -134,31 +192,31 @@ jobs:
             sha256sum -c "${checksum}"
           done
 
-      - name: Resolve release tag
-        id: release
+      - name: Move nightly tag
+        if: needs.prepare.outputs.tag == 'nightly'
         env:
-          INPUT_TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ needs.prepare.outputs.sha }}
         run: |
-          if [ -n "${GITHUB_REF_NAME}" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            tag="${GITHUB_REF_NAME}"
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/nightly" --silent 2>/dev/null; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/git/refs/tags/nightly" \
+              -f sha="${TARGET_SHA}" -F force=true --silent
           else
-            tag="${INPUT_TAG}"
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref=refs/tags/nightly -f sha="${TARGET_SHA}" --silent
           fi
-
-          case "${tag}" in
-            v*) ;;
-            *) echo "Release tag must start with v, got: ${tag}" >&2; exit 1 ;;
-          esac
-
-          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release.outputs.tag }}
-          name: ${{ steps.release.outputs.tag }}
-          target_commitish: ${{ github.sha }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: ${{ needs.prepare.outputs.tag }}
+          target_commitish: ${{ needs.prepare.outputs.sha }}
           files: |
             dist/*.tar.gz
             dist/*.sha256
-          generate_release_notes: true
+          prerelease: ${{ needs.prepare.outputs.tag == 'nightly' }}
+          make_latest: ${{ needs.prepare.outputs.tag == 'nightly' && 'false' || 'legacy' }}
+          body: ${{ needs.prepare.outputs.tag == 'nightly' && format('Rolling build from main at commit {0}.', needs.prepare.outputs.sha) || '' }}
+          generate_release_notes: ${{ needs.prepare.outputs.tag != 'nightly' }}
+          overwrite_files: true

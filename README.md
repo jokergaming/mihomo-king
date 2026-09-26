@@ -68,12 +68,18 @@ mihomo-king completion zsh > "${fpath[1]}/_mihomo-king"
 GitHub Actions publishes release binaries for Linux and macOS on amd64 and arm64.
 Each Linux architecture has a glibc-linked archive and a static musl-compatible
 archive. The release workflow checks the linkage of both variants.
-Create and push a version tag to publish a release:
+Release titles match their `vX.X` or `vX.X.X` tags. Create and push a version
+tag to publish a stable release:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
+
+Every push to `main` refreshes the `nightly` prerelease from that commit.
+GitHub Releases require a tag, so the workflow moves a non-version `nightly`
+tag internally; no version tag is needed. Run the workflow manually without a
+tag input to refresh nightly, or provide an existing version tag to rebuild it.
 
 The release uploads `tar.gz` archives and SHA-256 checksum files for:
 
