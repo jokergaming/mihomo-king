@@ -19,13 +19,14 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 ## Build & run
 
 ```bash
-make build          # or: go build -o mihomo-king .
+make build          # Linux glibc build (default)
+make build LIBC=musl # static Linux build for musl systems
 ./mihomo-king       # no arguments: open the TUI
 make install        # binary to ~/.local/bin, bash/zsh completions to ~/.local/share
 ```
 
-`make build` disables CGO. The resulting Linux binary is statically linked and
-does not require glibc, so it also runs on musl-based distributions.
+`make build` uses glibc by default. `LIBC=musl` disables CGO and produces a
+static binary that runs on musl-based distributions without a libc dependency.
 
 ## Command line
 
@@ -65,9 +66,8 @@ mihomo-king completion zsh > "${fpath[1]}/_mihomo-king"
 ## Release
 
 GitHub Actions publishes release binaries for Linux and macOS on amd64 and arm64.
-Linux archives are statically linked and work on both glibc and musl systems;
-the release workflow checks that they have no ELF interpreter or shared-library
-dependency.
+Each Linux architecture has a glibc-linked archive and a static musl-compatible
+archive. The release workflow checks the linkage of both variants.
 Create and push a version tag to publish a release:
 
 ```bash
@@ -77,8 +77,10 @@ git push origin v0.1.0
 
 The release uploads `tar.gz` archives and SHA-256 checksum files for:
 
-- `linux-amd64`
-- `linux-arm64`
+- `linux-amd64-glibc` (default)
+- `linux-amd64-musl`
+- `linux-arm64-glibc` (default)
+- `linux-arm64-musl`
 - `darwin-amd64`
 - `darwin-arm64`
 

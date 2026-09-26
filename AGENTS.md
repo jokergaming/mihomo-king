@@ -21,7 +21,7 @@ Keep it simple. Resist adding rule editors, connection viewers, or provider mana
 
 ## Tech stack
 
-- **Go** (1.26 installed). Single static binary.
+- **Go** (1.26 installed). Single binary; Linux releases include glibc and static musl-compatible builds.
 - **Charm TUI stack**: `bubbletea` (Elm-architecture runtime), `bubbles` (list / textinput /
   spinner / table / viewport widgets), `lipgloss` (styling). Don't pin to memory — check
   `go.mod` for the actual versions once it exists.

@@ -16,20 +16,36 @@ permissions:
 
 jobs:
   build:
-    name: build ${{ matrix.goos }} ${{ matrix.goarch }}
-    runs-on: ubuntu-latest
+    name: build ${{ matrix.goos }} ${{ matrix.goarch }} ${{ matrix.libc }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - goos: linux
             goarch: amd64
+            libc: glibc
+            runner: ubuntu-24.04
+          - goos: linux
+            goarch: amd64
+            libc: musl
+            runner: ubuntu-24.04
           - goos: linux
             goarch: arm64
+            libc: glibc
+            runner: ubuntu-24.04-arm
+          - goos: linux
+            goarch: arm64
+            libc: musl
+            runner: ubuntu-24.04-arm
           - goos: darwin
             goarch: amd64
+            libc: none
+            runner: ubuntu-24.04
           - goos: darwin
             goarch: arm64
+            libc: none
+            runner: ubuntu-24.04
 
     steps:
       - name: Check out
@@ -46,34 +62,55 @@ jobs:
 
       - name: Build
         env:
-          CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          LIBC: ${{ matrix.libc }}
+          VERSION: ${{ inputs.tag || github.ref_name }}
         run: |
           mkdir -p dist
-          binary="mihomo-king-${GOOS}-${GOARCH}"
-          go build -trimpath -ldflags="-s -w -X mihomo-king/internal/cli.Version=${GITHUB_REF_NAME}" -o "dist/${binary}" .
+          suffix=""
+          ldflags="-s -w -X mihomo-king/internal/cli.Version=${VERSION}"
+          if [[ "${GOOS}" == linux ]]; then
+            suffix="-${LIBC}"
+            if [[ "${LIBC}" == glibc ]]; then
+              export CGO_ENABLED=1
+              ldflags="${ldflags} -linkmode external"
+            else
+              export CGO_ENABLED=0
+            fi
+          else
+            export CGO_ENABLED=0
+          fi
+          binary="mihomo-king-${GOOS}-${GOARCH}${suffix}"
+          go build -trimpath -ldflags="${ldflags}" -o "dist/${binary}" .
           tar -C dist -czf "dist/${binary}.tar.gz" "${binary}"
           (cd dist && sha256sum "${binary}.tar.gz" > "${binary}.tar.gz.sha256")
 
-      - name: Verify Linux binary has no glibc dependency
+      - name: Verify Linux linkage
         if: matrix.goos == 'linux'
         env:
-          GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          LIBC: ${{ matrix.libc }}
         run: |
-          binary="dist/mihomo-king-${GOOS}-${GOARCH}"
+          binary="dist/mihomo-king-linux-${GOARCH}-${LIBC}"
           headers="$(readelf -l "${binary}")"
           dynamic="$(readelf -d "${binary}")"
-          if [[ "${headers}" == *INTERP* || "${dynamic}" == *NEEDED* ]]; then
-            echo "${binary} depends on a dynamic loader or shared library" >&2
-            exit 1
+          if [[ "${LIBC}" == glibc ]]; then
+            [[ "${headers}" == *INTERP* && "${dynamic}" == *libc.so.6* ]] || {
+              echo "${binary} is not dynamically linked with glibc" >&2
+              exit 1
+            }
+          else
+            [[ "${headers}" != *INTERP* && "${dynamic}" != *NEEDED* ]] || {
+              echo "${binary} depends on a dynamic loader or shared library" >&2
+              exit 1
+            }
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mihomo-king-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: mihomo-king-${{ matrix.goos }}-${{ matrix.goarch }}-${{ matrix.libc }}
           path: |
             dist/*.tar.gz
             dist/*.sha256
