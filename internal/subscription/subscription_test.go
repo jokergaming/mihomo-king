@@ -158,6 +158,70 @@ func TestDownloadConvertsNodeList(t *testing.T) {
 	checkNodeList(t, res)
 }
 
+func TestDownloadKeepsEmptyClashWhenAlternateHasPlaceholders(t *testing.T) {
+	const clash = "proxies: []\n"
+	const placeholder = "ss://YWVzLTI1Ni1nY206cGFzcw@192.0.2.1:1#No%20nodes\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("subscription-userinfo", "total=1024")
+		switch r.Header.Get("User-Agent") {
+		case userAgent:
+			_, _ = w.Write([]byte(clash))
+		case nodeListUserAgent:
+			_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(placeholder))))
+		default:
+			t.Errorf("unexpected User-Agent %q", r.Header.Get("User-Agent"))
+		}
+	}))
+	defer srv.Close()
+
+	res, err := Download(srv.URL)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if !res.NoNodes || res.Proxies != 0 || string(res.Body) != clash || res.UserInfo != "total=1024" {
+		t.Fatalf("empty subscription = %#v", res)
+	}
+	path := filepath.Join(t.TempDir(), "sub.yaml")
+	if err := Store(path, res); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("empty subscription created a config file: %v", err)
+	}
+	previous := &Result{Body: []byte("proxies:\n  - {name: old, type: direct}\n")}
+	if err := Store(path, previous); err != nil {
+		t.Fatal(err)
+	}
+	if err := Store(path, res); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(path); err != nil || string(body) != string(previous.Body) {
+		t.Fatalf("existing config changed: %q, %v", body, err)
+	}
+}
+
+func TestDownloadRetriesUsableNodeList(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("User-Agent") {
+		case userAgent:
+			_, _ = w.Write([]byte("proxies: []\n"))
+		case nodeListUserAgent:
+			_, _ = w.Write([]byte(base64.StdEncoding.EncodeToString([]byte("ss://YWVzLTI1Ni1nY206cGFzcw@example.com:8388#node\n"))))
+		default:
+			t.Errorf("unexpected User-Agent %q", r.Header.Get("User-Agent"))
+		}
+	}))
+	defer srv.Close()
+
+	res, err := Download(srv.URL)
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+	if res.NoNodes || !res.Fallback || res.Proxies != 1 {
+		t.Fatalf("node-list fallback = %#v", res)
+	}
+}
+
 func TestReadFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nodes.txt")

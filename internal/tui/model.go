@@ -452,6 +452,9 @@ func (m *Model) reloadSubs() {
 		if info := subscription.FormatUserInfo(sub.UserInfo); info != "" {
 			desc = info + "  ·  " + source
 		}
+		if sub.NoNodes {
+			desc = "no usable nodes  ·  " + desc
+		}
 		title := sub.Name
 		if sub.Name == m.settings.Active {
 			title = "● " + sub.Name + " (active)"

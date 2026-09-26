@@ -5,10 +5,12 @@ package subscription
 import (
 	"cmp"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -25,8 +27,18 @@ import (
 
 // userAgent makes providers serve Clash-format YAML rather than a raw node list.
 const userAgent = "clash.meta/1.19 (mihomo-king)"
-
+const nodeListUserAgent = "v2rayN/6.0"
 const maxBody = 32 << 20 // 32 MiB
+
+var errNoProxies = errors.New("subscription has no proxies")
+var errPlaceholderNodes = errors.New("subscription provider returned placeholder nodes")
+
+var documentationNetworks = [...]netip.Prefix{
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("2001:db8::/32"),
+}
 
 // defaultGroup is the select group generated for subscriptions that carry
 // nodes but no proxy groups (node lists, bare proxy lists).
@@ -38,25 +50,46 @@ var reservedNames = []string{"DIRECT", "REJECT", "REJECT-DROP", "PASS", "COMPATI
 
 // Result holds a fetched subscription, normalized to Clash/mihomo YAML.
 type Result struct {
-	Body     []byte
-	UserInfo string         // raw subscription-userinfo header, if any
-	Proxies  int            // inline proxies in Body
-	Skipped  map[string]int // node links that could not be converted, by scheme
+	Body         []byte
+	UserInfo     string         // raw subscription-userinfo header, if any
+	Proxies      int            // inline proxies in Body
+	Skipped      map[string]int // node links that could not be converted, by scheme
+	Fallback     bool           // the Clash response had no proxies; a node list was used
+	Placeholders int            // links pointing to documentation addresses
+	NoNodes      bool           // the provider currently has no usable nodes
 }
 
-// Download fetches a subscription URL in any format Parse accepts.
+// Download fetches a subscription URL in any format Parse accepts. Some
+// providers serve an empty Clash config but a usable node list for v2rayN.
 func Download(rawURL string) (*Result, error) {
+	emptyResult, err := downloadWithUserAgent(rawURL, userAgent)
+	if !errors.Is(err, errNoProxies) {
+		return emptyResult, err
+	}
+	res, retryErr := downloadWithUserAgent(rawURL, nodeListUserAgent)
+	if retryErr != nil {
+		if errors.Is(retryErr, errNoProxies) || errors.Is(retryErr, errPlaceholderNodes) {
+			emptyResult.NoNodes = true
+			return emptyResult, nil
+		}
+		return nil, fmt.Errorf("Clash response has no proxies; alternate format: %w", retryErr)
+	}
+	res.Fallback = true
+	return res, nil
+}
+
+func downloadWithUserAgent(rawURL, agent string) (*Result, error) {
 	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", agent)
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		// The URL usually carries an access token; name only the host.
-		if uerr, ok := err.(*url.Error); ok {
+		if uerr, ok := errors.AsType[*url.Error](err); ok {
 			uerr.URL = req.URL.Host
 		}
 		return nil, err
@@ -71,11 +104,10 @@ func Download(rawURL string) (*Result, error) {
 		return nil, fmt.Errorf("subscription returned %s", resp.Status)
 	}
 	res, err := Parse(body)
-	if err != nil {
-		return nil, err
+	if res != nil {
+		res.UserInfo = resp.Header.Get("subscription-userinfo")
 	}
-	res.UserInfo = resp.Header.Get("subscription-userinfo")
-	return res, nil
+	return res, err
 }
 
 // ReadFile imports a subscription file from disk in any format Parse accepts.
@@ -141,12 +173,15 @@ func unquote(s string) string {
 	return s
 }
 
-// Store writes a subscription body to path, creating parent dirs.
-func Store(path string, body []byte) error {
+// Store leaves an existing usable body untouched when the provider has no nodes.
+func Store(path string, res *Result) error {
+	if res.NoNodes {
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, body, 0o644)
+	return os.WriteFile(path, res.Body, 0o644)
 }
 
 // Parse normalizes a subscription body to Clash/mihomo YAML. It accepts a
@@ -188,7 +223,7 @@ func parseClash(text string) (res *Result, ok bool, err error) {
 	proxies, _ := root["proxies"].([]any)
 	providers, _ := root["proxy-providers"].(map[string]any)
 	if len(proxies) == 0 && len(providers) == 0 {
-		return nil, true, fmt.Errorf("subscription has no proxies")
+		return &Result{Body: []byte(text + "\n")}, true, errNoProxies
 	}
 
 	res = &Result{Body: []byte(text + "\n"), Proxies: len(proxies)}
@@ -225,6 +260,7 @@ func parseLinks(text string) (*Result, error) {
 	var proxies []any
 	var names []string
 	skipped := map[string]int{}
+	placeholders := 0
 	var firstErr error
 	for line := range strings.Lines(text) {
 		line = strings.TrimSpace(line)
@@ -242,12 +278,19 @@ func parseLinks(text string) (*Result, error) {
 		}
 		name, _ := proxy["name"].(string)
 		server, _ := proxy["server"].(string)
+		if isDocumentationAddress(server) {
+			placeholders++
+			continue
+		}
 		name = uniqueName(cmp.Or(strings.TrimSpace(name), scheme+"-"+server), taken)
 		proxy["name"] = name
 		proxies = append(proxies, proxy)
 		names = append(names, name)
 	}
 	if len(proxies) == 0 {
+		if placeholders > 0 {
+			return nil, fmt.Errorf("%w: %d links use documentation IP addresses", errPlaceholderNodes, placeholders)
+		}
 		if firstErr != nil {
 			return nil, fmt.Errorf("no supported node links: %w", firstErr)
 		}
@@ -260,7 +303,7 @@ func parseLinks(text string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	res := &Result{Body: body, Proxies: len(proxies)}
+	res := &Result{Body: body, Proxies: len(proxies), Placeholders: placeholders}
 	if len(skipped) > 0 {
 		res.Skipped = skipped
 	}
@@ -307,6 +350,19 @@ func linkScheme(line string) (string, bool) {
 	return strings.ToLower(scheme), true
 }
 
+func isDocumentationAddress(server string) bool {
+	address, err := netip.ParseAddr(server)
+	if err != nil {
+		return false
+	}
+	for _, network := range documentationNetworks {
+		if network.Contains(address.Unmap()) {
+			return true
+		}
+	}
+	return false
+}
+
 // decodeBase64 decodes a base64 subscription body. Providers differ in
 // alphabet and padding, and some wrap the text across lines.
 func decodeBase64(text string) (string, bool) {
@@ -333,6 +389,15 @@ func (r *Result) Summary() string {
 		}
 		schemes := strings.Join(slices.Sorted(maps.Keys(r.Skipped)), ", ")
 		parts = append(parts, fmt.Sprintf("skipped %s (%s)", plural(total, "link", "links"), schemes))
+	}
+	if r.Fallback {
+		parts = append(parts, "used node list (Clash response had no proxies)")
+	}
+	if r.Placeholders > 0 {
+		parts = append(parts, fmt.Sprintf("skipped %d placeholder nodes", r.Placeholders))
+	}
+	if r.NoNodes {
+		parts = append(parts, "no usable nodes (select nodes in provider sharing settings)")
 	}
 	return strings.Join(parts, " · ")
 }

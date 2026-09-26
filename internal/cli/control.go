@@ -127,7 +127,9 @@ pass --apply to also load it when the active subscription was updated.`,
 				return err
 			}
 			if slices.Contains(names, s.Active) && !slices.Contains(failed, s.Active) {
-				if apply {
+				if active, _ := s.FindSub(s.Active); active != nil && active.NoNodes {
+					fmt.Fprintln(out, "active subscription has no usable nodes; current runtime unchanged")
+				} else if apply {
 					if err := mihomo.SwitchSub(s, s.Active); err != nil {
 						return err
 					}
@@ -166,11 +168,12 @@ func updateSub(s *config.Settings, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := subscription.Store(s.SubPath(sub.Name), res.Body); err != nil {
+	if err := subscription.Store(s.SubPath(sub.Name), res); err != nil {
 		return "", err
 	}
 	updated := *sub
 	updated.UpdatedAt = time.Now().Format("2006-01-02 15:04")
+	updated.NoNodes = res.NoNodes
 	if sub.Path == "" {
 		updated.UserInfo = res.UserInfo
 	}

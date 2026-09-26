@@ -35,8 +35,12 @@ func Reload(s *config.Settings) error {
 // replaces a working one. s is not modified: the caller records name as
 // active (and saves) once this succeeds.
 func SwitchSub(s *config.Settings, name string) error {
-	if sub, _ := s.FindSub(name); sub == nil {
+	sub, _ := s.FindSub(name)
+	if sub == nil {
 		return fmt.Errorf("no subscription named %q", name)
+	}
+	if sub.NoNodes {
+		return fmt.Errorf("%s has no usable nodes; update it after selecting nodes in provider sharing settings", name)
 	}
 	next := *s
 	next.Active = name

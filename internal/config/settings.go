@@ -24,6 +24,7 @@ type Subscription struct {
 	Path      string `yaml:"path,omitempty"`
 	UpdatedAt string `yaml:"updated_at,omitempty"`
 	UserInfo  string `yaml:"user_info,omitempty"` // raw subscription-userinfo header
+	NoNodes   bool   `yaml:"no_nodes,omitempty"`
 }
 
 // LocalNode is a single node link pasted by the user. It is merged into the

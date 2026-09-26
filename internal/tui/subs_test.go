@@ -2,6 +2,8 @@ package tui
 
 import (
 	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -101,6 +103,25 @@ func TestImportFileCmdStoresConvertedSubscription(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "MATCH,PROXY") {
 		t.Fatalf("stored subscription is not the converted config:\n%s", body)
+	}
+}
+
+func TestDownloadCmdRecordsEmptySubscription(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("proxies: []\n"))
+	}))
+	defer srv.Close()
+
+	dest := filepath.Join(t.TempDir(), "sub.yaml")
+	msg, ok := downloadCmd("empty", srv.URL, dest)().(subDownloadedMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("downloadCmd = %#v", msg)
+	}
+	if !msg.sub.NoNodes || msg.sub.URL != srv.URL || !strings.Contains(msg.note, "no usable nodes") {
+		t.Fatalf("empty subscription message = %#v", msg)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("empty subscription created a config file: %v", err)
 	}
 }
 

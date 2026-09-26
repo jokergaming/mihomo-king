@@ -48,3 +48,16 @@ func TestCheckActive(t *testing.T) {
 		t.Fatalf("CheckActive on a valid config: %v", err)
 	}
 }
+
+func TestSwitchSubRejectsNoNodes(t *testing.T) {
+	s := &config.Settings{
+		Active:        "current",
+		Subscriptions: []config.Subscription{{Name: "empty", NoNodes: true}},
+	}
+	if err := SwitchSub(s, "empty"); err == nil || !strings.Contains(err.Error(), "no usable nodes") {
+		t.Fatalf("SwitchSub error = %v", err)
+	}
+	if s.Active != "current" {
+		t.Fatalf("active subscription changed to %q", s.Active)
+	}
+}

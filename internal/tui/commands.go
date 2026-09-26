@@ -177,7 +177,7 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 		if err != nil {
 			return subDownloadedMsg{err: err}
 		}
-		if err := subscription.Store(dest, res.Body); err != nil {
+		if err := subscription.Store(dest, res); err != nil {
 			return subDownloadedMsg{err: err}
 		}
 		return subDownloadedMsg{
@@ -186,6 +186,7 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 				URL:       rawURL,
 				UpdatedAt: time.Now().Format("2006-01-02 15:04"),
 				UserInfo:  res.UserInfo,
+				NoNodes:   res.NoNodes,
 			},
 			note: fetchedNote("downloaded "+name, res),
 		}
@@ -204,7 +205,7 @@ func importFileCmd(name, rawPath, dest string) tea.Cmd {
 		if err != nil {
 			return subDownloadedMsg{err: err}
 		}
-		if err := subscription.Store(dest, res.Body); err != nil {
+		if err := subscription.Store(dest, res); err != nil {
 			return subDownloadedMsg{err: err}
 		}
 		return subDownloadedMsg{

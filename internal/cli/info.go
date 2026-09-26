@@ -201,7 +201,11 @@ func subsCmd() *cobra.Command {
 				case !urls:
 					source = sourceHost(sub.URL)
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", mark, sub.Name, dash(subscription.FormatUserInfo(sub.UserInfo)), dash(sub.UpdatedAt), source)
+				name := sub.Name
+				if sub.NoNodes {
+					name += " (no nodes)"
+				}
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", mark, name, dash(subscription.FormatUserInfo(sub.UserInfo)), dash(sub.UpdatedAt), source)
 			}
 			for _, node := range s.LocalNodes {
 				fmt.Fprintf(w, "\tLocal / %s\t-\t-\tlocal node\n", node.Name)
