@@ -1,6 +1,11 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestValidateSubName(t *testing.T) {
 	tests := []struct {
@@ -73,5 +78,75 @@ func TestNormalizeForToolFixesInvalidLogLevel(t *testing.T) {
 	s.NormalizeForTool()
 	if s.LogLevel != "fatal" {
 		t.Fatalf("sing-box log level = %q, want fatal", s.LogLevel)
+	}
+}
+
+func TestEditSubPreservesCacheAndActive(t *testing.T) {
+	dir := t.TempDir()
+	s := &Settings{
+		appDir:        dir,
+		Active:        "old",
+		Subscriptions: []Subscription{{Name: "old", URL: "https://old.example/sub", UpdatedAt: "yesterday"}},
+	}
+	if err := os.MkdirAll(s.SubsDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("proxies: [cached]\n")
+	if err := os.WriteFile(s.SubPath("old"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := s.EditSub("old", "new", "https://new.example/sub", false)
+	if err != nil || !changed {
+		t.Fatalf("EditSub() changed=%v err=%v", changed, err)
+	}
+	if s.Active != "new" || !s.Subscriptions[0].NeedsUpdate || s.Subscriptions[0].UpdatedAt != "yesterday" {
+		t.Fatalf("edited settings = %#v", s)
+	}
+	got, err := os.ReadFile(s.SubPath("new"))
+	if err != nil || string(got) != string(body) {
+		t.Fatalf("renamed cache = %q, %v", got, err)
+	}
+	if _, err := os.Stat(s.SubPath("old")); !os.IsNotExist(err) {
+		t.Fatalf("old cache still exists: %v", err)
+	}
+	settings, err := os.ReadFile(filepath.Join(dir, "settings.yaml"))
+	if err != nil || !strings.Contains(string(settings), "active: new") || !strings.Contains(string(settings), "needs_update: true") {
+		t.Fatalf("saved settings = %q, %v", settings, err)
+	}
+}
+
+func TestEditSubRejectsNameCollisionWithoutReplacingCache(t *testing.T) {
+	dir := t.TempDir()
+	s := &Settings{appDir: dir, Subscriptions: []Subscription{{Name: "old"}, {Name: "taken"}}}
+	if err := os.MkdirAll(s.SubsDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(s.SubPath("taken"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EditSub("old", "taken", "https://example.com", false); err == nil {
+		t.Fatal("expected duplicate-name error")
+	}
+	got, err := os.ReadFile(s.SubPath("taken"))
+	if err != nil || string(got) != "keep" {
+		t.Fatalf("existing cache = %q, %v", got, err)
+	}
+}
+
+func TestEditLocalNodePersistsNameAndLink(t *testing.T) {
+	dir := t.TempDir()
+	s := &Settings{appDir: dir, LocalNodes: []LocalNode{{Name: "old", Link: "socks5://a.example:1080"}}}
+	link := "socks5://b.example:1080"
+	if err := s.EditLocalNode("old", "region/new", link); err != nil {
+		t.Fatal(err)
+	}
+	if s.LocalNodes[0].Name != "region/new" || s.LocalNodes[0].Link != link {
+		t.Fatalf("edited node = %#v", s.LocalNodes[0])
+	}
+	if err := s.EditLocalNode("region/new", "bad", "not-a-link"); err == nil {
+		t.Fatal("expected invalid-link error")
+	}
+	if s.LocalNodes[0].Name != "region/new" {
+		t.Fatal("invalid edit changed node")
 	}
 }

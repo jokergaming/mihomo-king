@@ -16,6 +16,12 @@ import (
 )
 
 func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.updatePrompt != "" {
+		return m.updateSourcePrompt(msg)
+	}
+	if m.editingSub {
+		return m.updateEditForm(msg)
+	}
 	if m.addForm != addNone {
 		return m.updateAddForm(msg)
 	}
@@ -35,6 +41,8 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.openAddForm(addFile)
 		case "n":
 			return m.openAddForm(addNode)
+		case "e":
+			return m.openEditForm()
 		case "u":
 			return m.updateSelectedSub()
 		case "d":
@@ -52,6 +60,130 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.subs, cmd = m.subs.Update(msg)
 	return m, cmd
+}
+
+func (m Model) openEditForm() (tea.Model, tea.Cmd) {
+	sel, ok := m.subs.SelectedItem().(item)
+	if !ok {
+		m.setErr("no item selected")
+		return m, nil
+	}
+	m.editID = sel.id
+	m.editStage = 0
+	m.editingSub = true
+	m.editLocal = false
+	name, source := "", ""
+	if localName, local := localNodeID(sel.id); local {
+		node, _ := m.settings.FindLocalNode(localName)
+		if node == nil {
+			m.editingSub = false
+			m.setErr("local node no longer exists")
+			return m, nil
+		}
+		m.editLocal = true
+		name, source = node.Name, node.Link
+		m.urlInput.Placeholder = "node link"
+	} else {
+		sub, _ := m.settings.FindSub(sel.id)
+		if sub == nil {
+			m.editingSub = false
+			m.setErr("subscription no longer exists")
+			return m, nil
+		}
+		name, source = sub.Name, sub.URL
+		if sub.Path != "" {
+			source = sub.Path
+		}
+		m.urlInput.Placeholder = "HTTP(S) URL or file path"
+	}
+	m.nameInput.SetValue(name)
+	m.editSource = source
+	m.nameInput.CursorEnd()
+	m.urlInput.SetValue(source)
+	m.urlInput.CursorEnd()
+	m.urlInput.Blur()
+	return m, m.nameInput.Focus()
+}
+
+func (m Model) editSourceIsFile() bool {
+	return subscription.IsLocalPath(m.urlInput.Value())
+}
+
+func (m Model) updateEditForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "esc":
+			m.editingSub = false
+			m.setStatus("cancelled")
+			return m, nil
+		case "tab":
+			if m.editStage == 1 && !m.editLocal && m.editSourceIsFile() {
+				return m, completePathCmd(m.urlInput.Value())
+			}
+		case "enter":
+			name := strings.TrimSpace(m.nameInput.Value())
+			if m.editLocal {
+				if name == "" {
+					m.setErr("node name required")
+					return m, nil
+				}
+			} else {
+				if err := config.ValidateSubName(name); err != nil {
+					m.setErr(err.Error())
+					return m, nil
+				}
+			}
+			if m.editStage == 0 {
+				m.editStage = 1
+				m.nameInput.Blur()
+				return m, m.urlInput.Focus()
+			}
+			source := strings.TrimSpace(m.urlInput.Value())
+			if source == "" {
+				m.setErr("source required")
+				return m, nil
+			}
+			oldName := m.editID
+			if m.editLocal {
+				oldName, _ = localNodeID(oldName)
+			}
+			if name == oldName && source == m.editSource {
+				m.editingSub = false
+				m.setStatus("unchanged")
+				return m, nil
+			}
+			m.editingSub = false
+			m.setStatus("saving " + name + "…")
+			if m.editLocal {
+				return m, editLocalNodeCmd(m.settings, oldName, name, source)
+			}
+			return m, editSubCmd(m.settings, m.editID, name, source)
+		}
+	}
+	in := &m.nameInput
+	if m.editStage == 1 {
+		in = &m.urlInput
+	}
+	var cmd tea.Cmd
+	*in, cmd = in.Update(msg)
+	return m, cmd
+}
+
+func (m Model) updateSourcePrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
+	k, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch k.String() {
+	case "y", "Y":
+		name := m.updatePrompt
+		m.updatePrompt = ""
+		return m.updateSubByName(name)
+	case "n", "N", "esc":
+		m.updatePrompt = ""
+		m.setStatus("current content kept; update pending")
+	}
+	return m, nil
 }
 
 func (m Model) openAddForm(form addForm) (tea.Model, tea.Cmd) {
@@ -179,7 +311,11 @@ func (m Model) updateSelectedSub() (tea.Model, tea.Cmd) {
 		m.setErr("local node " + localName + " has no remote update")
 		return m, nil
 	}
-	sub, _ := m.settings.FindSub(sel.id)
+	return m.updateSubByName(sel.id)
+}
+
+func (m Model) updateSubByName(name string) (tea.Model, tea.Cmd) {
+	sub, _ := m.settings.FindSub(name)
 	if sub == nil {
 		return m, nil
 	}
@@ -242,6 +378,22 @@ func (m Model) activateSelectedSub() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) viewSubs() string {
+	if m.updatePrompt != "" {
+		return titleStyle.Render("Update subscription now?") + "\n\n" +
+			"  " + m.updatePrompt + "\n\n" +
+			dimStyle.Render("  Current content stays in use until an update succeeds.")
+	}
+	if m.editingSub {
+		title := "Edit subscription"
+		sourceLabel := "source: "
+		if m.editLocal {
+			title = "Edit local node"
+			sourceLabel = "link:   "
+		}
+		return titleStyle.Render(title) + "\n\n" +
+			"  name:   " + m.nameInput.View() + "\n" +
+			"  " + sourceLabel + m.urlInput.View()
+	}
 	switch m.addForm {
 	case addNode:
 		return titleStyle.Render("Add local node") + "\n\n" +

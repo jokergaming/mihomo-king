@@ -68,11 +68,17 @@ type Model struct {
 	pwInput    textinput.Model
 
 	// subscriptions
-	subs      list.Model
-	addForm   addForm
-	addStage  int // field of the open form being edited: 0 = first, 1 = second
-	nameInput textinput.Model
-	urlInput  textinput.Model // url, node link or file path
+	subs         list.Model
+	addForm      addForm
+	addStage     int // field of the open form being edited: 0 = first, 1 = second
+	editingSub   bool
+	editID       string
+	editSource   string
+	editLocal    bool
+	editStage    int
+	updatePrompt string
+	nameInput    textinput.Model
+	urlInput     textinput.Model // url, node link or file path
 
 	// nodes
 	groups         []api.Group
@@ -209,6 +215,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setErr(msg.err.Error())
 			return m, nil
 		}
+		if previous, _ := m.settings.FindSub(msg.sub.Name); previous != nil && msg.sub.NoNodes {
+			msg.sub.NeedsUpdate = previous.NeedsUpdate
+		}
 		m.settings.UpsertSub(msg.sub)
 		if err := m.settings.Save(); err != nil {
 			m.setErr(err.Error())
@@ -218,8 +227,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reloadSubs()
 		return m, nil
 
+	case subEditedMsg:
+		m.reloadSubs()
+		if msg.err != nil {
+			m.setErr(msg.err.Error())
+			return m, nil
+		}
+		if msg.sourceChanged {
+			m.updatePrompt = msg.name
+			m.setStatus("source saved; update now?")
+		} else {
+			m.setStatus("saved " + msg.name)
+		}
+		return m, nil
+
 	case pathCompletionMsg:
-		if m.addForm != addFile || m.addStage != 0 || m.urlInput.Value() != msg.input {
+		completingAdd := m.addForm == addFile && m.addStage == 0
+		completingEdit := m.editingSub && m.editStage == 1 && !m.editLocal && m.editSourceIsFile()
+		if !completingAdd && !completingEdit || m.urlInput.Value() != msg.input {
 			return m, nil // the user kept typing or left the form
 		}
 		m.urlInput.SetValue(msg.value)
@@ -369,6 +394,12 @@ func (m Model) help() string {
 	switch m.screen {
 	case screenSubs:
 		switch {
+		case m.updatePrompt != "":
+			return "y update now · n keep current · esc keep current"
+		case m.editingSub && m.editStage == 1 && !m.editLocal && m.editSourceIsFile():
+			return "tab complete path · enter save · esc cancel"
+		case m.editingSub:
+			return "enter next/save · esc cancel"
 		case m.addForm == addFile && m.addStage == 0:
 			return "tab complete path · enter next · esc cancel"
 		case m.addForm != addNone:
@@ -377,7 +408,7 @@ func (m Model) help() string {
 		if m.subs.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "a add sub · i import file · n add node · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
+		return "a add sub · i import file · n add node · e edit · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
 	case screenNodes:
 		if m.editingTestURL {
 			return "enter save url · esc cancel"
@@ -454,6 +485,9 @@ func (m *Model) reloadSubs() {
 		}
 		if sub.NoNodes {
 			desc = "no usable nodes  ·  " + desc
+		}
+		if sub.NeedsUpdate {
+			desc = "! update needed  ·  " + desc
 		}
 		title := sub.Name
 		if sub.Name == m.settings.Active {

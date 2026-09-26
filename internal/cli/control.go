@@ -174,6 +174,9 @@ func updateSub(s *config.Settings, name string) (string, error) {
 	updated := *sub
 	updated.UpdatedAt = time.Now().Format("2006-01-02 15:04")
 	updated.NoNodes = res.NoNodes
+	if !res.NoNodes {
+		updated.NeedsUpdate = false
+	}
 	if sub.Path == "" {
 		updated.UserInfo = res.UserInfo
 	}

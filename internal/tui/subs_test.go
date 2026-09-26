@@ -125,6 +125,96 @@ func TestDownloadCmdRecordsEmptySubscription(t *testing.T) {
 	}
 }
 
+func TestEditSubscriptionKeepsCachedContentWhenUpdateDeclined(t *testing.T) {
+	m := editableSubsTestModel(t)
+	m.settings.UpsertSub(config.Subscription{Name: "old", URL: "https://old.example/sub"})
+	m.settings.Active = "old"
+	if err := os.WriteFile(m.settings.SubPath("old"), []byte("cached"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.reloadSubs()
+	m, _ = press(m, keyRunes("e"))
+	if !m.editingSub || m.nameInput.Value() != "old" || m.urlInput.Value() != "https://old.example/sub" {
+		t.Fatalf("edit form not prefilled: %#v", m)
+	}
+	m.nameInput.SetValue("renamed")
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.urlInput.SetValue("https://new.example/sub")
+	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil || m.editingSub {
+		t.Fatal("edit did not submit")
+	}
+	m, _ = press(m, cmd())
+	if m.updatePrompt != "renamed" || m.settings.Active != "renamed" {
+		t.Fatalf("prompt=%q active=%q", m.updatePrompt, m.settings.Active)
+	}
+	m, _ = press(m, keyRunes("n"))
+	if m.updatePrompt != "" || !m.settings.Subscriptions[0].NeedsUpdate {
+		t.Fatalf("pending update not retained: %#v", m.settings.Subscriptions[0])
+	}
+	got, err := os.ReadFile(m.settings.SubPath("renamed"))
+	if err != nil || string(got) != "cached" {
+		t.Fatalf("cached content = %q, %v", got, err)
+	}
+	row := m.subs.Items()[0].(item)
+	if !strings.Contains(row.desc, "! update needed") {
+		t.Fatalf("pending marker missing from %q", row.desc)
+	}
+}
+
+func TestEditSubscriptionUpdateNowClearsPendingMarker(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("proxies:\n  - name: node\n    type: socks5\n    server: example.com\n    port: 1080\n"))
+	}))
+	defer srv.Close()
+	m := editableSubsTestModel(t)
+	m.settings.UpsertSub(config.Subscription{Name: "sub", URL: "https://old.example/sub"})
+	m.reloadSubs()
+	m, _ = press(m, keyRunes("e"))
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m.urlInput.SetValue(srv.URL)
+	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = press(m, cmd())
+	m, cmd = press(m, keyRunes("y"))
+	if cmd == nil || m.updatePrompt != "" {
+		t.Fatal("update confirmation did not start download")
+	}
+	m, _ = press(m, cmd())
+	if m.settings.Subscriptions[0].NeedsUpdate {
+		t.Fatal("successful update left pending marker")
+	}
+	if !strings.Contains(m.subs.Items()[0].(item).desc, srv.URL) {
+		t.Fatal("edited source not shown")
+	}
+}
+
+func TestUnchangedLocalNodeEditDoesNotReload(t *testing.T) {
+	m := editableSubsTestModel(t)
+	m.settings.LocalNodes = []config.LocalNode{{Name: "region/node", Link: "socks5://example.com:1080"}}
+	m.reloadSubs()
+	m, _ = press(m, keyRunes("e"))
+	if !m.editLocal || m.nameInput.Value() != "region/node" {
+		t.Fatalf("local edit form not prefilled: %#v", m)
+	}
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || m.editingSub || m.status != "unchanged" {
+		t.Fatalf("unchanged edit started a command: status=%q", m.status)
+	}
+}
+
+func editableSubsTestModel(t *testing.T) Model {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(s)
+	m.screen = screenSubs
+	return m
+}
+
 func TestCompletePath(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"sub-a.yaml", "sub-b.yaml", "other.txt", ".hidden.yaml", "cjk/文a.txt", "cjk/斗b.txt"} {

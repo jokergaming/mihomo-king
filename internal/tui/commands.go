@@ -3,6 +3,8 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -35,6 +37,12 @@ type subDownloadedMsg struct {
 	sub  config.Subscription
 	note string
 	err  error
+}
+
+type subEditedMsg struct {
+	name          string
+	sourceChanged bool
+	err           error
 }
 
 type pathCompletionMsg struct {
@@ -216,6 +224,39 @@ func importFileCmd(name, rawPath, dest string) tea.Cmd {
 			},
 			note: fetchedNote("imported "+name, res),
 		}
+	}
+}
+
+func editSubCmd(s *config.Settings, oldName, name, rawSource string) tea.Cmd {
+	return func() tea.Msg {
+		isFile := subscription.IsLocalPath(rawSource)
+		source := rawSource
+		if isFile {
+			var err error
+			source, err = subscription.ResolvePath(rawSource)
+			if err != nil {
+				return subEditedMsg{err: err}
+			}
+		} else {
+			u, err := url.Parse(source)
+			if err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" {
+				return subEditedMsg{err: fmt.Errorf("source must be an HTTP(S) URL or file path")}
+			}
+		}
+		changed, err := s.EditSub(oldName, name, source, isFile)
+		return subEditedMsg{name: name, sourceChanged: changed, err: err}
+	}
+}
+
+func editLocalNodeCmd(s *config.Settings, oldName, name, link string) tea.Cmd {
+	return func() tea.Msg {
+		if err := s.EditLocalNode(oldName, name, strings.TrimSpace(link)); err != nil {
+			return subEditedMsg{err: err}
+		}
+		if err := reloadRuntimeConfig(s); err != nil {
+			return subEditedMsg{name: name, err: fmt.Errorf("saved %s; reload: %w", name, err)}
+		}
+		return subEditedMsg{name: name}
 	}
 }
 

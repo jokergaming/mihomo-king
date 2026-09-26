@@ -19,12 +19,13 @@ import (
 // at <appdir>/subscriptions/<Name>.yaml. Updating re-downloads URL, or re-reads
 // Path for a subscription imported from a local file.
 type Subscription struct {
-	Name      string `yaml:"name"`
-	URL       string `yaml:"url,omitempty"`
-	Path      string `yaml:"path,omitempty"`
-	UpdatedAt string `yaml:"updated_at,omitempty"`
-	UserInfo  string `yaml:"user_info,omitempty"` // raw subscription-userinfo header
-	NoNodes   bool   `yaml:"no_nodes,omitempty"`
+	Name        string `yaml:"name"`
+	URL         string `yaml:"url,omitempty"`
+	Path        string `yaml:"path,omitempty"`
+	UpdatedAt   string `yaml:"updated_at,omitempty"`
+	UserInfo    string `yaml:"user_info,omitempty"` // raw subscription-userinfo header
+	NoNodes     bool   `yaml:"no_nodes,omitempty"`
+	NeedsUpdate bool   `yaml:"needs_update,omitempty"`
 }
 
 // LocalNode is a single node link pasted by the user. It is merged into the
@@ -182,6 +183,67 @@ func (s *Settings) RemoveSub(name string) {
 	}
 }
 
+// EditSub changes metadata while keeping the cached body and active selection.
+func (s *Settings) EditSub(oldName, name, source string, isFile bool) (bool, error) {
+	if err := ValidateSubName(name); err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(source) == "" {
+		return false, fmt.Errorf("source required")
+	}
+	sub, index := s.FindSub(oldName)
+	if sub == nil {
+		return false, fmt.Errorf("subscription %q no longer exists", oldName)
+	}
+	if name != oldName {
+		if other, _ := s.FindSub(name); other != nil {
+			return false, fmt.Errorf("subscription %q already exists", name)
+		}
+		if _, err := os.Lstat(s.SubPath(name)); err == nil {
+			return false, fmt.Errorf("cached subscription %q already exists", name)
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	old := *sub
+	changed := isFile != (old.Path != "") || isFile && source != old.Path || !isFile && source != old.URL
+	updated := old
+	updated.Name = name
+	updated.URL, updated.Path = "", ""
+	if isFile {
+		updated.Path = source
+	} else {
+		updated.URL = source
+	}
+	updated.NeedsUpdate = old.NeedsUpdate || changed
+
+	renamed := false
+	if name != oldName {
+		if err := os.Rename(s.SubPath(oldName), s.SubPath(name)); err == nil {
+			renamed = true
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	s.Subscriptions[index] = updated
+	if s.Active == oldName {
+		s.Active = name
+	}
+	if err := s.Save(); err != nil {
+		s.Subscriptions[index] = old
+		if s.Active == name && oldName != name {
+			s.Active = oldName
+		}
+		if renamed {
+			if restoreErr := os.Rename(s.SubPath(name), s.SubPath(oldName)); restoreErr != nil {
+				return false, fmt.Errorf("save settings: %w; restore cache: %v", err, restoreErr)
+			}
+		}
+		return false, err
+	}
+	return changed, nil
+}
+
 func (s *Settings) FindLocalNode(name string) (*LocalNode, int) {
 	for i := range s.LocalNodes {
 		if s.LocalNodes[i].Name == name {
@@ -214,6 +276,31 @@ func (s *Settings) RemoveLocalNode(name string) bool {
 		return true
 	}
 	return false
+}
+
+func (s *Settings) EditLocalNode(oldName, name, link string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("node name required")
+	}
+	if _, err := ParseProxyLink(link); err != nil {
+		return err
+	}
+	_, index := s.FindLocalNode(oldName)
+	if index < 0 {
+		return fmt.Errorf("local node %q no longer exists", oldName)
+	}
+	if name != oldName {
+		if other, _ := s.FindLocalNode(name); other != nil {
+			return fmt.Errorf("local node %q already exists", name)
+		}
+	}
+	old := s.LocalNodes[index]
+	s.LocalNodes[index] = LocalNode{Name: name, Link: link}
+	if err := s.Save(); err != nil {
+		s.LocalNodes[index] = old
+		return err
+	}
+	return nil
 }
 
 // ActiveYAML reads the active subscription's stored YAML body, or (nil, nil) if
