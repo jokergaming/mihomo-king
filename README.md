@@ -24,6 +24,9 @@ make build          # or: go build -o mihomo-king .
 make install        # binary to ~/.local/bin, bash/zsh completions to ~/.local/share
 ```
 
+`make build` disables CGO. The resulting Linux binary is statically linked and
+does not require glibc, so it also runs on musl-based distributions.
+
 ## Command line
 
 Every common TUI action is also a subcommand (built with
@@ -62,6 +65,9 @@ mihomo-king completion zsh > "${fpath[1]}/_mihomo-king"
 ## Release
 
 GitHub Actions publishes release binaries for Linux and macOS on amd64 and arm64.
+Linux archives are statically linked and work on both glibc and musl systems;
+the release workflow checks that they have no ELF interpreter or shared-library
+dependency.
 Create and push a version tag to publish a release:
 
 ```bash

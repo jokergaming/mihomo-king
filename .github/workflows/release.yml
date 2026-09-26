@@ -56,6 +56,20 @@ jobs:
           tar -C dist -czf "dist/${binary}.tar.gz" "${binary}"
           sha256sum "dist/${binary}.tar.gz" > "dist/${binary}.tar.gz.sha256"
 
+      - name: Verify Linux binary has no glibc dependency
+        if: matrix.goos == 'linux'
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          binary="dist/mihomo-king-${GOOS}-${GOARCH}"
+          headers="$(readelf -l "${binary}")"
+          dynamic="$(readelf -d "${binary}")"
+          if [[ "${headers}" == *INTERP* || "${dynamic}" == *NEEDED* ]]; then
+            echo "${binary} depends on a dynamic loader or shared library" >&2
+            exit 1
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

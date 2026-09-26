@@ -5,7 +5,7 @@ PREFIX  ?= $(HOME)/.local
 .PHONY: build install completions test clean download-release
 
 build:
-	go build -trimpath -ldflags '$(LDFLAGS)' -o mihomo-king .
+	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o mihomo-king .
 
 # 下载指定版本到当前目录（需要已登录的 gh）：make download-release RELEASE=v1.2
 download-release:
