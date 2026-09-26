@@ -54,7 +54,7 @@ jobs:
           binary="mihomo-king-${GOOS}-${GOARCH}"
           go build -trimpath -ldflags="-s -w -X mihomo-king/internal/cli.Version=${GITHUB_REF_NAME}" -o "dist/${binary}" .
           tar -C dist -czf "dist/${binary}.tar.gz" "${binary}"
-          sha256sum "dist/${binary}.tar.gz" > "dist/${binary}.tar.gz.sha256"
+          (cd dist && sha256sum "${binary}.tar.gz" > "${binary}.tar.gz.sha256")
 
       - name: Verify Linux binary has no glibc dependency
         if: matrix.goos == 'linux'
@@ -89,6 +89,13 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      - name: Verify checksums
+        run: |
+          cd dist
+          for checksum in *.sha256; do
+            sha256sum -c "${checksum}"
+          done
 
       - name: Resolve release tag
         id: release
