@@ -1,10 +1,36 @@
 package config
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+func TestMergeConfigAnyTLSPassesInstalledChecker(t *testing.T) {
+	bin, err := exec.LookPath("mihomo")
+	if err != nil {
+		t.Skip("mihomo not installed")
+	}
+	dir := t.TempDir()
+	s := &Settings{Controller: "127.0.0.1:19091", Secret: "test", MixedPort: 17890, Mode: "rule", LogLevel: "info"}
+	sub := []byte("proxies:\n  - {name: node, type: anytls, server: example.com, port: 443, password: pass, tls: true, servername: edge.example.com, skip-cert-verify: true, tfo: true, udp: true}\nproxy-groups:\n  - {name: PROXY, type: select, proxies: [node]}\nrules:\n  - MATCH,PROXY\n")
+	config, err := s.MergeConfig(sub)
+	if err != nil {
+		t.Fatalf("MergeConfig: %v", err)
+	}
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, config, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.CommandContext(t.Context(), bin, "-t", "-d", dir, "-f", path).CombinedOutput()
+	if err != nil {
+		t.Fatalf("mihomo check failed: %v\n%s", err, strings.TrimSpace(string(out)))
+	}
+}
 
 func TestMergeConfigInjectsManagedKeysAndPreservesSubscription(t *testing.T) {
 	sub := []byte(`

@@ -101,6 +101,22 @@ func TestParseURLSafeBase64NodeList(t *testing.T) {
 	checkNodeList(t, res)
 }
 
+func TestParseBase64AnyTLSNodeList(t *testing.T) {
+	links := "anytls://pass@example.com:443?sni=edge.example.com&allowInsecure=1&tfo=1#node-1\nanytls://other@example.org:8443#node-2\n"
+	res, err := Parse([]byte(base64.StdEncoding.EncodeToString([]byte(links))))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if res.Proxies != 2 || len(res.Skipped) != 0 {
+		t.Fatalf("AnyTLS nodes = %#v", res)
+	}
+	cfg := decodeConfig(t, res.Body)
+	group := onlyGroup(t, cfg)
+	if !slices.Equal(stringsOf(group["proxies"]), []string{"node-1", "node-2"}) {
+		t.Fatalf("group proxies = %#v", group["proxies"])
+	}
+}
+
 func TestParsePlainNodeList(t *testing.T) {
 	body := "\ufeff# exported nodes\r\n\r\n" + strings.ReplaceAll(nodeLinks, "\n", "\r\n")
 	res, err := Parse([]byte(body))
@@ -197,6 +213,23 @@ func TestDownloadKeepsEmptyClashWhenAlternateHasPlaceholders(t *testing.T) {
 	}
 	if body, err := os.ReadFile(path); err != nil || string(body) != string(previous.Body) {
 		t.Fatalf("existing config changed: %q, %v", body, err)
+	}
+}
+
+func TestStoreUsesPrivatePermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub.yaml")
+	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Store(path, &Result{Body: []byte("new")}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("subscription mode = %#o, want 0600", got)
 	}
 }
 

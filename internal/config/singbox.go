@@ -244,6 +244,8 @@ func clashProxyToSingBox(proxy map[string]any) (map[string]any, bool) {
 		copyString(out, proxy, "flow")
 	case "trojan":
 		copyString(out, proxy, "password")
+	case "anytls":
+		copyString(out, proxy, "password")
 	case "hysteria2", "hy2":
 		out["type"] = "hysteria2"
 		copyString(out, proxy, "password")

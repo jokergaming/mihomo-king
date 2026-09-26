@@ -32,6 +32,8 @@ func ParseProxyLink(rawLink string) (map[string]any, error) {
 		return parseTrojanLink(u)
 	case "hysteria2", "hy2":
 		return parseHysteria2Link(u)
+	case "anytls":
+		return parseAnyTLSLink(u)
 	case "socks", "socks5":
 		return parseSocksLink(u)
 	case "http", "https":
@@ -258,6 +260,33 @@ func parseHysteria2Link(u *url.URL) (map[string]any, error) {
 	}
 	if obfsPassword := firstNonEmpty(q.Get("obfs-password"), q.Get("obfs_password"), q.Get("obfsPassword")); obfsPassword != "" {
 		proxy["obfs-password"] = obfsPassword
+	}
+	return proxy, nil
+}
+
+func parseAnyTLSLink(u *url.URL) (map[string]any, error) {
+	if u.User == nil || u.User.Username() == "" {
+		return nil, fmt.Errorf("anytls link missing password")
+	}
+	host, port, err := splitHostPort(u)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	proxy := map[string]any{
+		"name":     nodeName(u, "anytls-"+host),
+		"type":     "anytls",
+		"server":   host,
+		"port":     port,
+		"password": u.User.Username(),
+		"udp":      true,
+	}
+	applyURLTLS(proxy, q, true)
+	if alpn := q.Get("alpn"); alpn != "" {
+		proxy["alpn"] = splitCSV(alpn)
+	}
+	if queryBool(q, "tfo") {
+		proxy["tfo"] = true
 	}
 	return proxy, nil
 }

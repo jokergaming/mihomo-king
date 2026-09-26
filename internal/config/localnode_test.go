@@ -137,6 +137,28 @@ func TestParseHysteria2Link(t *testing.T) {
 	}
 }
 
+func TestParseAnyTLSLink(t *testing.T) {
+	proxy, err := ParseProxyLink("anytls://p%40ss@example.com:443?sni=edge.example.com&allowInsecure=1&tfo=1&alpn=h2,http%2F1.1#anytls-home")
+	if err != nil {
+		t.Fatalf("ParseProxyLink: %v", err)
+	}
+	if proxy["name"] != "anytls-home" || proxy["type"] != "anytls" || proxy["server"] != "example.com" || proxy["port"] != 443 {
+		t.Fatalf("basic anytls fields not parsed: %#v", proxy)
+	}
+	if proxy["password"] != "p@ss" || proxy["tls"] != true || proxy["servername"] != "edge.example.com" || proxy["skip-cert-verify"] != true || proxy["tfo"] != true {
+		t.Fatalf("anytls auth/tls fields not parsed: %#v", proxy)
+	}
+	if got := proxy["alpn"]; !sameStrings(got, []string{"h2", "http/1.1"}) {
+		t.Fatalf("anytls alpn = %#v", got)
+	}
+}
+
+func TestParseAnyTLSLinkRequiresPassword(t *testing.T) {
+	if _, err := ParseProxyLink("anytls://example.com:443#node"); err == nil {
+		t.Fatal("AnyTLS link without a password was accepted")
+	}
+}
+
 func TestParseSocksLink(t *testing.T) {
 	proxy, err := ParseProxyLink("socks5://user:pass@example.com:1080#socks-home")
 	if err != nil {

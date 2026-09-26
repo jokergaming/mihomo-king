@@ -181,7 +181,10 @@ func Store(path string, res *Result) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, res.Body, 0o644)
+	if err := os.WriteFile(path, res.Body, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o600)
 }
 
 // Parse normalizes a subscription body to Clash/mihomo YAML. It accepts a

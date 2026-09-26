@@ -250,6 +250,26 @@ func TestSingBoxConfigPreservesLocalHysteria2Options(t *testing.T) {
 	}
 }
 
+func TestSingBoxConfigConvertsAnyTLS(t *testing.T) {
+	s := &Settings{ManagedTool: ToolSingBox, Controller: "127.0.0.1:9091", Secret: "x", MixedPort: 7890, Mode: "rule", LogLevel: "info"}
+	sub := []byte("proxies:\n  - {name: node, type: anytls, server: example.com, port: 443, password: pass, tls: true, servername: edge.example.com, skip-cert-verify: true, tfo: true}\n")
+	cfg, err := s.SingBoxConfig(sub)
+	if err != nil {
+		t.Fatalf("SingBoxConfig: %v", err)
+	}
+	outbound := findOutbound(cfg["outbounds"].([]map[string]any), "node")
+	if outbound == nil || outbound["type"] != "anytls" || outbound["password"] != "pass" {
+		t.Fatalf("AnyTLS outbound = %#v", outbound)
+	}
+	if _, ok := outbound["tcp_fast_open"]; ok {
+		t.Fatalf("sing-box AnyTLS does not support tcp_fast_open: %#v", outbound)
+	}
+	tls := outbound["tls"].(map[string]any)
+	if tls["server_name"] != "edge.example.com" || tls["insecure"] != true {
+		t.Fatalf("AnyTLS TLS = %#v", tls)
+	}
+}
+
 func TestSingBoxConfigConvertsReality(t *testing.T) {
 	sub := []byte(`
 proxies:
@@ -345,8 +365,9 @@ func TestSingBoxConfigPassesInstalledChecker(t *testing.T) {
 	sub := []byte(`
 proxies:
   - {name: n1, type: ss, server: example.com, port: 443, cipher: aes-128-gcm, password: pass}
+  - {name: anytls, type: anytls, server: example.com, port: 443, password: pass, tls: true, servername: edge.example.com, skip-cert-verify: true, tfo: true}
 proxy-groups:
-  - {name: PROXY, type: select, proxies: [n1, DIRECT]}
+  - {name: PROXY, type: select, proxies: [n1, anytls, DIRECT]}
 rules:
   - MATCH,PROXY
 `)
