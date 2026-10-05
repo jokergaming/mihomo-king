@@ -35,6 +35,15 @@ type LocalNode struct {
 	Link string `yaml:"link"`
 }
 
+// ProxyChain routes an exit node's connection through an entry node.
+// Subscription scopes the chain so switching subscriptions cannot leave
+// dangling node references in the active config.
+type ProxyChain struct {
+	Subscription string `yaml:"subscription"`
+	Entry        string `yaml:"entry"`
+	Exit         string `yaml:"exit"`
+}
+
 // Settings is the persisted application configuration.
 type Settings struct {
 	ManagedTool   string         `yaml:"managed_tool"`
@@ -54,6 +63,7 @@ type Settings struct {
 	Active        string         `yaml:"active"` // active subscription name
 	Subscriptions []Subscription `yaml:"subscriptions"`
 	LocalNodes    []LocalNode    `yaml:"local_nodes,omitempty"`
+	Chain         *ProxyChain    `yaml:"chain,omitempty"`
 
 	appDir string // resolved at Load; not persisted
 }
@@ -181,6 +191,9 @@ func (s *Settings) RemoveSub(name string) {
 	if s.Active == name {
 		s.Active = ""
 	}
+	if s.Chain != nil && s.Chain.Subscription == name {
+		s.Chain = nil
+	}
 }
 
 // EditSub changes metadata while keeping the cached body and active selection.
@@ -206,6 +219,11 @@ func (s *Settings) EditSub(oldName, name, source string, isFile bool) (bool, err
 		}
 	}
 	old := *sub
+	var oldChain *ProxyChain
+	if s.Chain != nil {
+		oldChain = new(ProxyChain)
+		*oldChain = *s.Chain
+	}
 	changed := isFile != (old.Path != "") || isFile && source != old.Path || !isFile && source != old.URL
 	updated := old
 	updated.Name = name
@@ -229,8 +247,12 @@ func (s *Settings) EditSub(oldName, name, source string, isFile bool) (bool, err
 	if s.Active == oldName {
 		s.Active = name
 	}
+	if s.Chain != nil && s.Chain.Subscription == oldName {
+		s.Chain.Subscription = name
+	}
 	if err := s.Save(); err != nil {
 		s.Subscriptions[index] = old
+		s.Chain = oldChain
 		if s.Active == name && oldName != name {
 			s.Active = oldName
 		}
@@ -273,6 +295,9 @@ func (s *Settings) AddLocalNode(rawLink string) (LocalNode, error) {
 func (s *Settings) RemoveLocalNode(name string) bool {
 	if _, i := s.FindLocalNode(name); i >= 0 {
 		s.LocalNodes = append(s.LocalNodes[:i], s.LocalNodes[i+1:]...)
+		if s.Chain != nil && (s.Chain.Entry == name || s.Chain.Exit == name) {
+			s.Chain = nil
+		}
 		return true
 	}
 	return false
@@ -295,9 +320,23 @@ func (s *Settings) EditLocalNode(oldName, name, link string) error {
 		}
 	}
 	old := s.LocalNodes[index]
+	var oldChain *ProxyChain
+	if s.Chain != nil {
+		oldChain = new(ProxyChain)
+		*oldChain = *s.Chain
+	}
 	s.LocalNodes[index] = LocalNode{Name: name, Link: link}
+	if s.Chain != nil {
+		if s.Chain.Entry == oldName {
+			s.Chain.Entry = name
+		}
+		if s.Chain.Exit == oldName {
+			s.Chain.Exit = name
+		}
+	}
 	if err := s.Save(); err != nil {
 		s.LocalNodes[index] = old
+		s.Chain = oldChain
 		return err
 	}
 	return nil

@@ -17,7 +17,8 @@ func TestMergeConfigAnyTLSPassesInstalledChecker(t *testing.T) {
 	}
 	dir := t.TempDir()
 	s := &Settings{Controller: "127.0.0.1:19091", Secret: "test", MixedPort: 17890, Mode: "rule", LogLevel: "info"}
-	sub := []byte("proxies:\n  - {name: node, type: anytls, server: example.com, port: 443, password: pass, tls: true, servername: edge.example.com, skip-cert-verify: true, tfo: true, udp: true}\nproxy-groups:\n  - {name: PROXY, type: select, proxies: [node]}\nrules:\n  - MATCH,PROXY\n")
+	s.Chain = &ProxyChain{Entry: "entry", Exit: "node"}
+	sub := []byte("proxies:\n  - {name: entry, type: ss, server: entry.example.com, port: 8388, cipher: aes-128-gcm, password: pass}\n  - {name: node, type: anytls, server: example.com, port: 443, password: pass, tls: true, servername: edge.example.com, skip-cert-verify: true, tfo: true, udp: true}\nproxy-groups:\n  - {name: PROXY, type: select, proxies: [entry, node]}\nrules:\n  - MATCH,PROXY\n")
 	config, err := s.MergeConfig(sub)
 	if err != nil {
 		t.Fatalf("MergeConfig: %v", err)
@@ -29,6 +30,66 @@ func TestMergeConfigAnyTLSPassesInstalledChecker(t *testing.T) {
 	out, err := exec.CommandContext(t.Context(), bin, "-t", "-d", dir, "-f", path).CombinedOutput()
 	if err != nil {
 		t.Fatalf("mihomo check failed: %v\n%s", err, strings.TrimSpace(string(out)))
+	}
+}
+
+func TestMergeConfigAddsSelectableChainWithoutChangingExit(t *testing.T) {
+	s := &Settings{Active: "sub", Chain: &ProxyChain{Subscription: "sub", Entry: "entry", Exit: "exit"}}
+	sub := []byte(`proxies:
+  - {name: entry, type: ss, server: entry.example.com, port: 8388}
+  - {name: exit, type: trojan, server: exit.example.com, port: 443}
+proxy-groups:
+  - {name: Proxy, type: select, proxies: [entry, exit]}
+  - {name: Auto, type: url-test, proxies: [entry, exit]}
+`)
+	out, err := s.MergeConfig(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	proxies := mapSlice(got["proxies"])
+	if len(proxies) != 3 || proxies[1]["dialer-proxy"] != nil || proxies[2]["name"] != ChainNodeName || proxies[2]["dialer-proxy"] != "entry" {
+		t.Fatalf("chain proxies = %#v", proxies)
+	}
+	groups := anySlice(got["proxy-groups"])
+	if !stringListContains(stringList(findYAMLGroup(groups, "Proxy")["proxies"]), ChainNodeName) {
+		t.Fatal("chain not offered in manual group")
+	}
+	if stringListContains(stringList(findYAMLGroup(groups, "Auto")["proxies"]), ChainNodeName) {
+		t.Fatal("chain changed automatic group")
+	}
+	s.Active = "other"
+	out, err = s.MergeConfig(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(mapSlice(got["proxies"])) != 2 {
+		t.Fatal("chain leaked into another subscription")
+	}
+}
+
+func TestMergeConfigRejectsInvalidChain(t *testing.T) {
+	sub := []byte(`proxies:
+  - {name: entry, type: ss, server: entry.example.com, port: 8388}
+  - {name: exit, type: trojan, server: exit.example.com, port: 443}
+proxy-groups:
+  - {name: Proxy, type: select, proxies: [entry, exit]}
+`)
+	for _, chain := range []ProxyChain{
+		{Entry: "entry", Exit: "entry"},
+		{Entry: "missing", Exit: "exit"},
+		{Entry: "entry", Exit: "missing"},
+	} {
+		s := &Settings{Chain: &chain}
+		if _, err := s.MergeConfig(sub); err == nil {
+			t.Errorf("accepted chain %#v", chain)
+		}
 	}
 }
 

@@ -65,6 +65,27 @@ func TestNodesEnterGroupMemberFromAutoGroupOnlyOpens(t *testing.T) {
 	}
 }
 
+func TestChooseChainNodeUsesTwoConcreteMembers(t *testing.T) {
+	m := Model{
+		settings: &config.Settings{},
+		groups:   []api.Group{{Name: "Proxy", Type: "Selector", All: []string{"entry", "exit"}}},
+		nodes:    newList("Nodes"),
+		curGroup: "Proxy",
+	}
+	m.showMembers("Proxy")
+	first, cmd := m.chooseChainNode()
+	m = first.(Model)
+	if cmd != nil || m.chainEntry != "entry" {
+		t.Fatalf("first pick: chainEntry=%q, cmd=%v", m.chainEntry, cmd)
+	}
+	m.nodes.Select(1)
+	second, cmd := m.chooseChainNode()
+	m = second.(Model)
+	if cmd == nil || m.chainEntry != "" {
+		t.Fatalf("second pick: chainEntry=%q, cmd=%v", m.chainEntry, cmd)
+	}
+}
+
 func testGroups() []api.Group {
 	return []api.Group{
 		{Name: "PROXY", Type: "Selector", Now: config.LocalGroupName, All: []string{config.LocalGroupName, "remote-1"}},

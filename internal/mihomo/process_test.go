@@ -61,3 +61,38 @@ func TestSwitchSubRejectsNoNodes(t *testing.T) {
 		t.Fatalf("active subscription changed to %q", s.Active)
 	}
 }
+
+func TestSetChainPersistsAndRejectsInvalidChange(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.MihomoBin = fakeMihomo(t, "exit 0\n").MihomoBin
+	s.MihomoDir = t.TempDir()
+	s.LocalNodes = []config.LocalNode{
+		{Name: "entry", Link: "socks5://entry.example:1080"},
+		{Name: "exit", Link: "socks5://exit.example:1080"},
+	}
+	chain := &config.ProxyChain{Entry: "entry", Exit: "exit"}
+	if err := SetChain(s, chain); err != nil {
+		t.Fatal(err)
+	}
+	if s.ActiveChain() == nil {
+		t.Fatal("chain was not activated")
+	}
+	before, err := os.ReadFile(s.ConfigPath())
+	if err != nil || !strings.Contains(string(before), "dialer-proxy: entry") {
+		t.Fatalf("runtime config = %q, %v", before, err)
+	}
+	if err := SetChain(s, &config.ProxyChain{Entry: "missing", Exit: "exit"}); err == nil {
+		t.Fatal("invalid chain was accepted")
+	}
+	after, err := os.ReadFile(s.ConfigPath())
+	if err != nil || string(after) != string(before) || s.ActiveChain().Entry != "entry" {
+		t.Fatal("invalid chain changed the saved or runtime config")
+	}
+	if err := SetChain(s, nil); err != nil || s.ActiveChain() != nil {
+		t.Fatalf("clear chain: %v", err)
+	}
+}

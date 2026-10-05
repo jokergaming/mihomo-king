@@ -5,6 +5,7 @@ package mihomo
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -90,21 +91,29 @@ func Start(s *config.Settings) error {
 // CheckActive validates the runtime config the active subscription would
 // produce, without touching the config the runtime is using.
 func CheckActive(s *config.Settings) error {
-	if s.Tool() != config.ToolMihomo {
-		return nil
-	}
 	body, err := s.ActiveYAML()
 	if err != nil {
 		return err
 	}
-	merged, err := s.MergeConfig(body)
+	var merged []byte
+	ext := ".yaml"
+	if s.Tool() == config.ToolSingBox {
+		cfg, err := s.SingBoxConfig(body)
+		if err != nil {
+			return err
+		}
+		merged, err = json.Marshal(cfg)
+		ext = ".json"
+	} else {
+		merged, err = s.MergeConfig(body)
+	}
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(s.RuntimeDir(), 0o755); err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(s.RuntimeDir(), ".mihomo-king-check-*.yaml")
+	f, err := os.CreateTemp(s.RuntimeDir(), ".mihomo-king-check-*"+ext)
 	if err != nil {
 		return err
 	}
@@ -119,17 +128,16 @@ func CheckActive(s *config.Settings) error {
 	return CheckConfig(s, f.Name())
 }
 
-// CheckConfig validates a mihomo config file with `mihomo -t` against the data
-// dir, so a config the runtime would reject (e.g. a GeoSite list missing from
-// GeoSite.dat) is caught before it replaces a working one. sing-box configs
-// are not checked.
+// CheckConfig validates a generated config with the selected core before it
+// can replace the running configuration.
 func CheckConfig(s *config.Settings, path string) error {
-	if s.Tool() != config.ToolMihomo {
-		return nil
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, s.Binary(), "-t", "-d", s.RuntimeDir(), "-f", path).CombinedOutput()
+	args := []string{"-t", "-d", s.RuntimeDir(), "-f", path}
+	if s.Tool() == config.ToolSingBox {
+		args = []string{"check", "-D", s.RuntimeDir(), "-c", path}
+	}
+	out, err := exec.CommandContext(ctx, s.Binary(), args...).CombinedOutput()
 	if err == nil {
 		return nil
 	}
@@ -137,7 +145,7 @@ func CheckConfig(s *config.Settings, path string) error {
 		return fmt.Errorf("config check timed out")
 	}
 	msg := checkFailure(string(out))
-	if strings.Contains(msg, "GeoSite.dat") {
+	if s.Tool() == config.ToolMihomo && strings.Contains(msg, "GeoSite.dat") {
 		msg += fmt.Sprintf(" (replace %s with MetaCubeX geosite.dat)", filepath.Join(s.RuntimeDir(), "GeoSite.dat"))
 	}
 	return fmt.Errorf("config rejected: %s", msg)

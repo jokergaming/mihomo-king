@@ -89,6 +89,7 @@ type Model struct {
 	nodeDelays     map[string]int
 	editingTestURL bool
 	testURLInput   textinput.Model
+	chainEntry     string
 
 	// settings
 	settingsList   list.Model
@@ -172,7 +173,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			bodyH = 3
 		}
 		m.subs.SetSize(msg.Width-4, bodyH)
-		m.nodes.SetSize(msg.Width-4, bodyH)
+		m.nodes.SetSize(msg.Width-4, max(3, bodyH-2))
 		m.settingsList.SetSize(msg.Width-4, bodyH)
 		return m, nil
 
@@ -276,6 +277,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.openPendingGroupOrShowGroups()
 		return m, nil
 
+	case chainMsg:
+		if msg.err != nil {
+			m.setErr(msg.err.Error())
+			return m, nil
+		}
+		m.setStatus(msg.note)
+		if !msg.running {
+			return m, nil
+		}
+		m.pendingGroup = m.curGroup
+		return m, loadGroupsCmd(m.settings, msg.note)
+
 	case delayMsg:
 		if msg.err != nil {
 			m.setErr("delay: " + msg.err.Error())
@@ -332,6 +345,9 @@ func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 // switchScreen activates a screen and kicks off its data refresh.
 func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 	m.screen = s
+	if s != screenNodes {
+		m.chainEntry = ""
+	}
 	switch s {
 	case screenSubs:
 		m.reloadSubs()
@@ -416,7 +432,10 @@ func (m Model) help() string {
 		if m.nodes.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "enter open/select · l test selected · a test group · u set url · esc back · r reload · / filter · tab/1/2/3/4 switch · q quit"
+		if m.chainEntry != "" {
+			return "c choose exit · x cancel chain setup · esc back · / filter"
+		}
+		return "enter open/select · c set chain · x clear chain · l test · a test group · u set url · esc back · r reload · / filter · tab/1/2/3/4 switch · q quit"
 	case screenSettings:
 		if m.editingSetting {
 			if len(m.settingOptions(m.settingKey)) > 0 {

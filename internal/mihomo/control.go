@@ -29,6 +29,43 @@ func Reload(s *config.Settings) error {
 	return nil
 }
 
+// SetChain validates and applies a chain before persisting it. If applying or
+// saving fails, the previous runtime config is restored.
+func SetChain(s *config.Settings, chain *config.ProxyChain) error {
+	if chain != nil {
+		if chain.Subscription != s.Active {
+			return fmt.Errorf("chain subscription does not match the active subscription")
+		}
+		copy := *chain
+		chain = &copy
+	}
+	previous := s.Chain
+	if (previous == nil && chain == nil) || (previous != nil && chain != nil && *previous == *chain) {
+		return nil
+	}
+	next := *s
+	next.Chain = chain
+	if err := CheckActive(&next); err != nil {
+		return err
+	}
+	if err := Reload(&next); err != nil {
+		return restoreChain(s, fmt.Errorf("apply chain: %w", err))
+	}
+	s.Chain = chain
+	if err := s.Save(); err != nil {
+		s.Chain = previous
+		return restoreChain(s, fmt.Errorf("save chain: %w", err))
+	}
+	return nil
+}
+
+func restoreChain(s *config.Settings, err error) error {
+	if restoreErr := Reload(s); restoreErr != nil {
+		return fmt.Errorf("%w; restoring previous config also failed: %v", err, restoreErr)
+	}
+	return err
+}
+
 // SwitchSub applies subscription name as the runtime config. Its config is
 // validated first, and if the runtime still rejects it the config of the
 // currently active subscription is restored, so a broken subscription never

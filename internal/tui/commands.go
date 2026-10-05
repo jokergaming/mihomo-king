@@ -33,6 +33,12 @@ type groupsMsg struct {
 	err    error
 }
 
+type chainMsg struct {
+	note    string
+	running bool
+	err     error
+}
+
 type subDownloadedMsg struct {
 	sub  config.Subscription
 	note string
@@ -303,7 +309,7 @@ func reloadRuntimeConfig(s *config.Settings) error {
 	return mihomo.Reload(s)
 }
 
-func loadGroupsCmd(s *config.Settings) tea.Cmd {
+func loadGroupsCmd(s *config.Settings, note ...string) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
@@ -313,7 +319,24 @@ func loadGroupsCmd(s *config.Settings) tea.Cmd {
 		if errors.Is(err, api.ErrUnauthorized) {
 			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
-		return groupsMsg{groups: groups, err: err}
+		msg := groupsMsg{groups: groups, err: err}
+		if len(note) > 0 {
+			msg.note = note[0]
+		}
+		return msg
+	}
+}
+
+func setChainCmd(s *config.Settings, chain *config.ProxyChain) tea.Cmd {
+	return func() tea.Msg {
+		if err := mihomo.SetChain(s, chain); err != nil {
+			return chainMsg{err: err}
+		}
+		running, _ := mihomo.Running(s)
+		if chain == nil {
+			return chainMsg{note: "chain cleared", running: running}
+		}
+		return chainMsg{note: "chain: " + chain.Entry + " → " + chain.Exit + "; select " + config.ChainNodeName + " in a group", running: running}
 	}
 }
 

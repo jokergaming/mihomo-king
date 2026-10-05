@@ -35,6 +35,9 @@ func (s *Settings) SingBoxConfig(subYAML []byte) (map[string]any, error) {
 	if err := s.applyLocalNodes(root); err != nil {
 		return nil, err
 	}
+	if err := s.applyChain(root); err != nil {
+		return nil, err
+	}
 
 	outbounds := []map[string]any{
 		{"type": "direct", "tag": "DIRECT"},
@@ -48,6 +51,9 @@ func (s *Settings) SingBoxConfig(subYAML []byte) (map[string]any, error) {
 		}
 		outbounds = append(outbounds, outbound)
 		proxyTags[str(outbound["tag"])] = true
+	}
+	if chain := s.ActiveChain(); chain != nil && (!proxyTags[chain.Entry] || !proxyTags[ChainNodeName]) {
+		return nil, fmt.Errorf("chain nodes must use proxy types supported by sing-box conversion")
 	}
 
 	rawGroups := mapSlice(root["proxy-groups"])
@@ -266,6 +272,7 @@ func clashProxyToSingBox(proxy map[string]any) (map[string]any, bool) {
 	default:
 		return nil, false
 	}
+	copyStringAs(out, "detour", proxy, "dialer-proxy")
 	return out, true
 }
 

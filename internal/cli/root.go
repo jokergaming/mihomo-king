@@ -71,7 +71,7 @@ routing mode and node selection. Run it without a command to open the TUI.`,
 		c.GroupID = groupControl
 		root.AddCommand(c)
 	}
-	for _, c := range []*cobra.Command{groupsCmd(), nodesCmd(), selectCmd(), delayCmd()} {
+	for _, c := range []*cobra.Command{groupsCmd(), nodesCmd(), selectCmd(), chainCmd(), delayCmd()} {
 		c.GroupID = groupProxies
 		root.AddCommand(c)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
+	"mihomo-king/internal/mihomo"
 	"mihomo-king/internal/subscription"
 )
 
@@ -119,6 +120,47 @@ func selectCmd() *cobra.Command {
 				return apiErr(s, err)
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "%s → %s\n", group, node)
+			return nil
+		}),
+	}
+}
+
+func chainCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "chain [<entry> <exit>|off]",
+		Short: "Show, set, or clear the active subscription's proxy chain",
+		Long:  "A chain connects to the exit through the entry. After setting it, select 'mihomo-king Chain' in a manual proxy group to use it.",
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 || len(args) == 1 && args[0] == "off" || len(args) == 2 {
+				return nil
+			}
+			return fmt.Errorf("use 'chain', 'chain <entry> <exit>', or 'chain off'")
+		},
+		RunE: withSettings(func(cmd *cobra.Command, s *config.Settings, args []string) error {
+			if len(args) == 0 {
+				if chain := s.ActiveChain(); chain != nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "%s → %s (select %s in a group)\n", chain.Entry, chain.Exit, config.ChainNodeName)
+				} else {
+					fmt.Fprintln(cmd.OutOrStdout(), "chain off")
+				}
+				return nil
+			}
+			if args[0] == "off" {
+				if s.ActiveChain() == nil {
+					fmt.Fprintln(cmd.OutOrStdout(), "chain already off")
+					return nil
+				}
+				if err := mihomo.SetChain(s, nil); err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), "chain cleared")
+				return nil
+			}
+			chain := &config.ProxyChain{Subscription: s.Active, Entry: args[0], Exit: args[1]}
+			if err := mihomo.SetChain(s, chain); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "chain: %s → %s; select %s in a group\n", chain.Entry, chain.Exit, config.ChainNodeName)
 			return nil
 		}),
 	}

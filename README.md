@@ -14,6 +14,7 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - Convert Clash/mihomo subscriptions into sing-box runtime config.
 - Toggle TUN mode.
 - Switch the selected node within a proxy group.
+- Create an entry-to-exit proxy chain and select it in a manual proxy group.
 - Test node and group latency with a configurable test URL.
 
 ## Build & run
@@ -39,6 +40,7 @@ Information:  status [--json] · version · paths [settings|subs|dir|config|log|
 Control:      start · stop · restart · use <sub> · update [--all] [--apply] [sub...]
               tun [on|off|toggle] [--force] · mode [rule|global|direct]
 Proxies:      groups [-s] · nodes <group> · select <group> <node>
+              chain [<entry> <exit>|off]
               delay [--url URL] [--timeout 5s] <group|node> [node]
 ```
 
@@ -48,8 +50,16 @@ mihomo-king status
 mihomo-king use provider-a            # validated with mihomo -t, rolled back if the reload fails
 mihomo-king select Proxy "HK 02"
 mihomo-king delay Proxy              # every member, fastest first
+mihomo-king chain "HK 01" "US 02"     # connect to US 02 through HK 01
+mihomo-king select Proxy "mihomo-king Chain" # route that group through the chain
+mihomo-king chain off                 # remove the generated chain node
 tail -f "$(mihomo-king paths log)"
 ```
+
+The chain uses two concrete nodes from the active subscription or local nodes.
+One chain is saved at a time for the active subscription and becomes available
+in its manual proxy groups. Switching subscriptions leaves the other
+subscription's routing as is.
 
 ### Shell completion
 

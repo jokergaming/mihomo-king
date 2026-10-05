@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mihomo-king/internal/api"
+	"mihomo-king/internal/config"
 )
 
 func (m Model) updateNodes(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -35,6 +36,20 @@ func (m Model) updateNodes(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, refreshStatusCmd(m.settings)
 		case "enter":
 			return m.nodesEnter()
+		case "c":
+			return m.chooseChainNode()
+		case "x":
+			if m.chainEntry != "" {
+				m.chainEntry = ""
+				m.setStatus("chain setup cancelled")
+				return m, nil
+			}
+			if m.settings.ActiveChain() == nil {
+				m.setStatus("chain is off")
+				return m, nil
+			}
+			m.setStatus("clearing chain…")
+			return m, setChainCmd(m.settings, nil)
 		case "l":
 			return m.testSelectedNode()
 		case "a":
@@ -55,6 +70,34 @@ func (m Model) updateNodes(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.nodes, cmd = m.nodes.Update(msg)
 	return m, cmd
+}
+
+func (m Model) chooseChainNode() (tea.Model, tea.Cmd) {
+	if m.curGroup == "" {
+		m.setErr("open a group and choose an entry node")
+		return m, nil
+	}
+	sel, ok := m.nodes.SelectedItem().(item)
+	if !ok {
+		return m, nil
+	}
+	if m.findGroup(sel.id) != nil || sel.id == "DIRECT" || sel.id == "REJECT" || sel.id == config.ChainNodeName {
+		m.setErr("choose a concrete proxy node for the chain")
+		return m, nil
+	}
+	if m.chainEntry == "" {
+		m.chainEntry = sel.id
+		m.setStatus("chain entry: " + sel.id + "; choose an exit node with c")
+		return m, nil
+	}
+	if m.chainEntry == sel.id {
+		m.setErr("entry and exit must be different nodes")
+		return m, nil
+	}
+	chain := &config.ProxyChain{Subscription: m.settings.Active, Entry: m.chainEntry, Exit: sel.id}
+	m.chainEntry = ""
+	m.setStatus("applying chain…")
+	return m, setChainCmd(m.settings, chain)
 }
 
 func (m Model) updateTestURL(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -234,11 +277,17 @@ func (m *Model) memberDescription(name string) string {
 }
 
 func (m Model) viewNodes() string {
+	view := m.nodes.View()
+	if chain := m.settings.ActiveChain(); chain != nil {
+		view = fmt.Sprintf("Chain: %s → %s  (%s)\n\n%s", chain.Entry, chain.Exit, config.ChainNodeName, view)
+	} else if m.chainEntry != "" {
+		view = fmt.Sprintf("Chain entry: %s  ·  choose exit\n\n%s", m.chainEntry, view)
+	}
 	if !m.editingTestURL {
-		return m.nodes.View()
+		return view
 	}
 	return fmt.Sprintf("%s\n\n%s\n%s",
-		m.nodes.View(),
+		view,
 		labelStyle.Render("test url"),
 		m.testURLInput.View())
 }

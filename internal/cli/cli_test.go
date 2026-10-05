@@ -58,6 +58,7 @@ func TestArgValidation(t *testing.T) {
 		{"tun", "maybe"},
 		{"paths", "nope"},
 		{"select", "only-group"},
+		{"chain", "only-entry"},
 		{"use"},
 		{"use", "missing"},
 		{"check", "missing"},
@@ -66,6 +67,13 @@ func TestArgValidation(t *testing.T) {
 		if _, err := run(t, args...); err == nil {
 			t.Errorf("%v: expected an error", args)
 		}
+	}
+}
+
+func TestChainShowsOffWithoutRunningCore(t *testing.T) {
+	out, err := run(t, "chain")
+	if err != nil || strings.TrimSpace(out) != "chain off" {
+		t.Fatalf("chain output = %q, %v", out, err)
 	}
 }
 

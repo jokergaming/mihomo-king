@@ -150,3 +150,29 @@ func TestEditLocalNodePersistsNameAndLink(t *testing.T) {
 		t.Fatal("invalid edit changed node")
 	}
 }
+
+func TestChainReferencesFollowRenamesAndDeletion(t *testing.T) {
+	dir := t.TempDir()
+	s := &Settings{
+		appDir:        dir,
+		Active:        "old-sub",
+		Subscriptions: []Subscription{{Name: "old-sub", URL: "https://example.com/sub"}},
+		LocalNodes:    []LocalNode{{Name: "entry", Link: "socks5://entry.example:1080"}},
+		Chain:         &ProxyChain{Subscription: "old-sub", Entry: "entry", Exit: "exit"},
+	}
+	if err := s.EditLocalNode("entry", "renamed", "socks5://entry.example:1080"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Chain.Entry != "renamed" {
+		t.Fatalf("chain entry after node rename = %q", s.Chain.Entry)
+	}
+	if _, err := s.EditSub("old-sub", "new-sub", "https://example.com/sub", false); err != nil {
+		t.Fatal(err)
+	}
+	if s.Active != "new-sub" || s.Chain.Subscription != "new-sub" {
+		t.Fatalf("chain after subscription rename = %#v", s.Chain)
+	}
+	if !s.RemoveLocalNode("renamed") || s.Chain != nil {
+		t.Fatal("removing chain entry did not clear the chain")
+	}
+}

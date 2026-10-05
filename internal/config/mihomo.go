@@ -21,6 +21,9 @@ func (s *Settings) MergeConfig(subYAML []byte) ([]byte, error) {
 	if err := s.applyLocalNodes(root); err != nil {
 		return nil, err
 	}
+	if err := s.applyChain(root); err != nil {
+		return nil, err
+	}
 
 	root["external-controller"] = s.Controller
 	root["secret"] = s.Secret

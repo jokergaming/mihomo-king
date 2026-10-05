@@ -361,6 +361,7 @@ func TestSingBoxConfigPassesInstalledChecker(t *testing.T) {
 		TunEnable:   true,
 		TunDevice:   "mihomo-king-test",
 		TunAddress:  "172.19.0.1/30",
+		Chain:       &ProxyChain{Entry: "n1", Exit: "anytls"},
 	}
 	sub := []byte(`
 proxies:
@@ -373,6 +374,14 @@ rules:
 `)
 	if err := s.WriteSingBoxConfig(sub); err != nil {
 		t.Fatalf("WriteSingBoxConfig: %v", err)
+	}
+	cfg, err := s.SingBoxConfig(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chained := findOutbound(cfg["outbounds"].([]map[string]any), ChainNodeName)
+	if chained == nil || chained["detour"] != "n1" {
+		t.Fatalf("chain outbound = %#v", chained)
 	}
 	out, err := exec.Command(bin, "check", "-D", dir, "-c", s.ConfigPath()).CombinedOutput()
 	if err != nil {
