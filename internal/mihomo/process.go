@@ -22,6 +22,22 @@ import (
 	"mihomo-king/internal/config"
 )
 
+// CoreVersion queries the version of the managed binary.
+func CoreVersion(s *config.Settings) string {
+	arg := "-v"
+	if s.Tool() == config.ToolSingBox || s.Tool() == config.ToolXray {
+		arg = "version"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, s.Binary(), arg).Output()
+	if err != nil {
+		return fmt.Sprintf("%s (%s: %v)", s.ToolLabel(), s.Binary(), err)
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return line
+}
+
 // Running reports whether the tracked managed process is alive, with its PID.
 func Running(s *config.Settings) (bool, int) {
 	pid, err := readPID(s.PidFile())
@@ -50,9 +66,12 @@ func Start(s *config.Settings) error {
 	if s.Active == "" && len(s.LocalNodes) == 0 {
 		return fmt.Errorf("no active subscription or local node — press 2 to add one, then start")
 	}
-	// Our managed tool isn't running, so a taken controller port means another
-	// process owns it — starting would silently collide with it.
-	if controllerPortBusy(s.Controller) {
+	// For mihomo/sing-box, controller port must not be taken. For xray, mixed port must not be taken.
+	if s.Tool() == config.ToolXray {
+		if portBusy(s.MixedPort) {
+			return fmt.Errorf("mixed port %d is already in use by another process; change mixed port in settings", s.MixedPort)
+		}
+	} else if controllerPortBusy(s.Controller) {
 		return fmt.Errorf("controller %s is already in use by another process; change controller in settings", s.Controller)
 	}
 	if err := s.WriteActiveFromStore(); err != nil {
@@ -80,10 +99,18 @@ func Start(s *config.Settings) error {
 	if err := os.WriteFile(s.PidFile(), []byte(strconv.Itoa(pid)), 0o644); err != nil {
 		return err
 	}
-	if err := waitController(s.Controller, s.Secret, 5*time.Second); err != nil {
-		_ = syscall.Kill(-pid, syscall.SIGTERM)
-		_ = os.Remove(s.PidFile())
-		return fmt.Errorf("%s controller was not ready: %w; see %s", s.ToolLabel(), err, s.LogFile())
+	if s.Tool() == config.ToolXray {
+		if err := waitPort(s.MixedPort, 5*time.Second); err != nil {
+			_ = syscall.Kill(-pid, syscall.SIGTERM)
+			_ = os.Remove(s.PidFile())
+			return fmt.Errorf("%s mixed port was not ready: %w; see %s", s.ToolLabel(), err, s.LogFile())
+		}
+	} else {
+		if err := waitController(s.Controller, s.Secret, 5*time.Second); err != nil {
+			_ = syscall.Kill(-pid, syscall.SIGTERM)
+			_ = os.Remove(s.PidFile())
+			return fmt.Errorf("%s controller was not ready: %w; see %s", s.ToolLabel(), err, s.LogFile())
+		}
 	}
 	return nil
 }
@@ -97,14 +124,22 @@ func CheckActive(s *config.Settings) error {
 	}
 	var merged []byte
 	ext := ".yaml"
-	if s.Tool() == config.ToolSingBox {
+	switch s.Tool() {
+	case config.ToolSingBox:
 		cfg, err := s.SingBoxConfig(body)
 		if err != nil {
 			return err
 		}
 		merged, err = json.Marshal(cfg)
 		ext = ".json"
-	} else {
+	case config.ToolXray:
+		cfg, err := s.XrayConfig(body)
+		if err != nil {
+			return err
+		}
+		merged, err = json.Marshal(cfg)
+		ext = ".json"
+	default:
 		merged, err = s.MergeConfig(body)
 	}
 	if err != nil {
@@ -134,8 +169,11 @@ func CheckConfig(s *config.Settings, path string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	args := []string{"-t", "-d", s.RuntimeDir(), "-f", path}
-	if s.Tool() == config.ToolSingBox {
+	switch s.Tool() {
+	case config.ToolSingBox:
 		args = []string{"check", "-D", s.RuntimeDir(), "-c", path}
+	case config.ToolXray:
+		args = []string{"run", "-test", "-c", path}
 	}
 	out, err := exec.CommandContext(ctx, s.Binary(), args...).CombinedOutput()
 	if err == nil {
@@ -248,6 +286,29 @@ func TunDeviceUp(name string) bool {
 	return iface.Flags&net.FlagUp != 0
 }
 
+func portBusy(port int) bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return true
+	}
+	_ = ln.Close()
+	return false
+}
+
+func waitPort(port int, timeout time.Duration) error {
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for port %d", port)
+}
+
 func controllerPortBusy(controller string) bool {
 	addr := strings.TrimPrefix(strings.TrimPrefix(controller, "https://"), "http://")
 	ln, err := net.Listen("tcp", addr)
@@ -259,10 +320,14 @@ func controllerPortBusy(controller string) bool {
 }
 
 func startArgs(s *config.Settings) []string {
-	if s.Tool() == config.ToolSingBox {
+	switch s.Tool() {
+	case config.ToolSingBox:
 		return []string{"run", "-D", s.RuntimeDir(), "-c", s.ConfigPath()}
+	case config.ToolXray:
+		return []string{"run", "-c", s.ConfigPath()}
+	default:
+		return []string{"-d", s.RuntimeDir(), "-f", s.ConfigPath()}
 	}
-	return []string{"-d", s.RuntimeDir(), "-f", s.ConfigPath()}
 }
 
 func checkBinary(label, bin string) error {

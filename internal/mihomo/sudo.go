@@ -34,8 +34,14 @@ func Restart(s *config.Settings) error {
 		}
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	for controllerPortBusy(s.Controller) && time.Now().Before(deadline) {
-		time.Sleep(100 * time.Millisecond)
+	if s.Tool() == config.ToolXray {
+		for portBusy(s.MixedPort) && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+		}
+	} else {
+		for controllerPortBusy(s.Controller) && time.Now().Before(deadline) {
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 	return Start(s)
 }

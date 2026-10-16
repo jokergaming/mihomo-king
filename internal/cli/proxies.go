@@ -48,9 +48,19 @@ func groupsCmd() *cobra.Command {
 		Short: "List proxy groups",
 		Args:  cobra.NoArgs,
 		RunE: withSettings(func(cmd *cobra.Command, s *config.Settings, args []string) error {
-			_, groups, err := liveGroups(s)
-			if err != nil {
-				return err
+			var groups []api.Group
+			if s.Tool() == config.ToolXray {
+				var err error
+				groups, err = s.XrayGroups()
+				if err != nil {
+					return err
+				}
+			} else {
+				var err error
+				_, groups, err = liveGroups(s)
+				if err != nil {
+					return err
+				}
 			}
 			w := newTable(cmd.OutOrStdout())
 			fmt.Fprintln(w, "GROUP\tTYPE\tNODES\tNOW")
@@ -74,9 +84,19 @@ func nodesCmd() *cobra.Command {
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeGroupThenMember(false),
 		RunE: withSettings(func(cmd *cobra.Command, s *config.Settings, args []string) error {
-			_, groups, err := liveGroups(s)
-			if err != nil {
-				return err
+			var groups []api.Group
+			if s.Tool() == config.ToolXray {
+				var err error
+				groups, err = s.XrayGroups()
+				if err != nil {
+					return err
+				}
+			} else {
+				var err error
+				_, groups, err = liveGroups(s)
+				if err != nil {
+					return err
+				}
 			}
 			g := findGroup(groups, args[0])
 			if g == nil {
@@ -102,11 +122,36 @@ func selectCmd() *cobra.Command {
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeGroupThenMember(true),
 		RunE: withSettings(func(cmd *cobra.Command, s *config.Settings, args []string) error {
+			group, node := args[0], args[1]
+			if s.Tool() == config.ToolXray {
+				groups, err := s.XrayGroups()
+				if err != nil {
+					return err
+				}
+				g := findGroup(groups, group)
+				switch {
+				case g == nil:
+					return fmt.Errorf("no group named %q", group)
+				case !isSelector(*g):
+					return fmt.Errorf("%s picks nodes automatically (%s); only select groups are switchable", group, g.Type)
+				case !slices.Contains(g.All, node):
+					return fmt.Errorf("%s has no member %q", group, node)
+				}
+				s.XrayNode = node
+				if err := s.Save(); err != nil {
+					return fmt.Errorf("save setting: %w", err)
+				}
+				if err := mihomo.Reload(s); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%s → %s\n", group, node)
+				return nil
+			}
+
 			c, groups, err := liveGroups(s)
 			if err != nil {
 				return err
 			}
-			group, node := args[0], args[1]
 			g := findGroup(groups, group)
 			switch {
 			case g == nil:
@@ -178,13 +223,52 @@ node name, only that node is tested.`,
 		Args:              cobra.RangeArgs(1, 2),
 		ValidArgsFunction: completeGroupThenMember(false),
 		RunE: withSettings(func(cmd *cobra.Command, s *config.Settings, args []string) error {
+			url := cmp.Or(testURL, s.TestURL)
+			ms := int(timeout.Milliseconds())
+			out := cmd.OutOrStdout()
+
+			if s.Tool() == config.ToolXray {
+				groups, err := s.XrayGroups()
+				if err != nil {
+					return err
+				}
+				g := findGroup(groups, args[0])
+				if len(args) == 2 || g == nil {
+					node := args[len(args)-1]
+					d, err := s.XrayDelay(node, url, timeout)
+					if err != nil {
+						return fmt.Errorf("%s: %w", node, err)
+					}
+					w := newTable(out)
+					fmt.Fprintf(w, "%s\t%s\n", node, delayText(d))
+					return w.Flush()
+				}
+				delays, err := s.XrayGroupDelay(g.Name, url, timeout)
+				if err != nil {
+					return err
+				}
+				names := slices.Clone(g.All)
+				slices.SortStableFunc(names, func(a, b string) int {
+					da, db := delays[a], delays[b]
+					if (da > 0) != (db > 0) {
+						if da > 0 {
+							return -1
+						}
+						return 1
+					}
+					return cmp.Compare(da, db)
+				})
+				w := newTable(out)
+				for _, name := range names {
+					fmt.Fprintf(w, "%s\t%s\n", name, delayText(delays[name]))
+				}
+				return w.Flush()
+			}
+
 			c, groups, err := liveGroups(s)
 			if err != nil {
 				return err
 			}
-			url := cmp.Or(testURL, s.TestURL)
-			ms := int(timeout.Milliseconds())
-			out := cmd.OutOrStdout()
 			g := findGroup(groups, args[0])
 			if len(args) == 2 || g == nil {
 				node := args[len(args)-1]
@@ -246,6 +330,10 @@ func completionGroups() []api.Group {
 	s, err := loadSettings()
 	if err != nil {
 		return nil
+	}
+	if s.Tool() == config.ToolXray {
+		groups, _ := s.XrayGroups()
+		return groups
 	}
 	c, err := liveClient(s)
 	if err != nil {

@@ -51,6 +51,9 @@ type Settings struct {
 	MihomoDir     string         `yaml:"mihomo_dir"`
 	SingBoxBin    string         `yaml:"sing_box_bin"`
 	SingBoxDir    string         `yaml:"sing_box_dir"`
+	XrayBin       string         `yaml:"xray_bin"`
+	XrayDir       string         `yaml:"xray_dir"`
+	XrayNode      string         `yaml:"xray_node,omitempty"`
 	Controller    string         `yaml:"controller"`
 	Secret        string         `yaml:"secret"`
 	MixedPort     int            `yaml:"mixed_port"`
@@ -71,6 +74,7 @@ type Settings struct {
 const (
 	ToolMihomo  = "mihomo"
 	ToolSingBox = "sing-box"
+	ToolXray    = "xray"
 )
 
 // Load reads settings.yaml (creating it with defaults if absent), ensures the
@@ -122,46 +126,69 @@ func (s *Settings) SubPath(n string) string { return filepath.Join(s.SubsDir(), 
 func (s *Settings) PidFile() string         { return filepath.Join(s.appDir, s.Tool()+".pid") }
 func (s *Settings) LogFile() string         { return filepath.Join(s.appDir, s.Tool()+".log") }
 func (s *Settings) ConfigPath() string {
-	if s.Tool() == ToolSingBox {
+	switch s.Tool() {
+	case ToolSingBox:
 		return filepath.Join(s.SingBoxDir, "config.json")
+	case ToolXray:
+		return filepath.Join(s.XrayDir, "config.json")
+	default:
+		return filepath.Join(s.MihomoDir, "config.yaml")
 	}
-	return filepath.Join(s.MihomoDir, "config.yaml")
 }
 
 func (s *Settings) Tool() string {
-	if s.ManagedTool == ToolSingBox {
+	switch s.ManagedTool {
+	case ToolSingBox:
 		return ToolSingBox
+	case ToolXray:
+		return ToolXray
+	default:
+		return ToolMihomo
 	}
-	return ToolMihomo
 }
 
 func (s *Settings) ToolLabel() string {
-	if s.Tool() == ToolSingBox {
+	switch s.Tool() {
+	case ToolSingBox:
 		return "sing-box"
+	case ToolXray:
+		return "xray"
+	default:
+		return "mihomo"
 	}
-	return "mihomo"
 }
 
 func (s *Settings) Binary() string {
-	if s.Tool() == ToolSingBox {
+	switch s.Tool() {
+	case ToolSingBox:
 		return s.SingBoxBin
+	case ToolXray:
+		return s.XrayBin
+	default:
+		return s.MihomoBin
 	}
-	return s.MihomoBin
 }
 
 func (s *Settings) SetBinary(path string) {
-	if s.Tool() == ToolSingBox {
+	switch s.Tool() {
+	case ToolSingBox:
 		s.SingBoxBin = path
-		return
+	case ToolXray:
+		s.XrayBin = path
+	default:
+		s.MihomoBin = path
 	}
-	s.MihomoBin = path
 }
 
 func (s *Settings) RuntimeDir() string {
-	if s.Tool() == ToolSingBox {
+	switch s.Tool() {
+	case ToolSingBox:
 		return s.SingBoxDir
+	case ToolXray:
+		return s.XrayDir
+	default:
+		return s.MihomoDir
 	}
-	return s.MihomoDir
 }
 
 // FindSub returns the subscription with the given name and its index, or (nil, -1).
@@ -379,6 +406,8 @@ func defaults() *Settings {
 		MihomoDir:   defaultMihomoDir(),
 		SingBoxBin:  findSingBoxBin(),
 		SingBoxDir:  defaultSingBoxDir(),
+		XrayBin:     findXrayBin(),
+		XrayDir:     defaultXrayDir(),
 		Controller:  "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
 		TunDevice:   "mihomo-king",    // not the default "Meta": avoid colliding with another instance's tun
 		TunAddress:  "172.19.0.1/30",
@@ -393,7 +422,7 @@ func (s *Settings) applyDefaults() {
 	if s.ManagedTool == "" {
 		s.ManagedTool = detectManagedTool()
 	}
-	if s.ManagedTool != ToolSingBox {
+	if s.ManagedTool != ToolSingBox && s.ManagedTool != ToolXray {
 		s.ManagedTool = ToolMihomo
 	}
 	if s.MihomoBin == "" {
@@ -407,6 +436,12 @@ func (s *Settings) applyDefaults() {
 	}
 	if s.SingBoxDir == "" {
 		s.SingBoxDir = defaultSingBoxDir()
+	}
+	if s.XrayBin == "" {
+		s.XrayBin = findXrayBin()
+	}
+	if s.XrayDir == "" {
+		s.XrayDir = defaultXrayDir()
 	}
 	if s.Controller == "" {
 		s.Controller = "127.0.0.1:9091"
@@ -449,6 +484,9 @@ func LogLevels(tool string) []string {
 	if tool == ToolSingBox {
 		return []string{"trace", "debug", "info", "warn", "error", "fatal", "panic"}
 	}
+	if tool == ToolXray {
+		return []string{"debug", "info", "warning", "error", "none"}
+	}
 	return []string{"debug", "info", "warning", "error", "silent"}
 }
 
@@ -487,6 +525,13 @@ func findSingBoxBin() string {
 	return "sing-box"
 }
 
+func findXrayBin() string {
+	if p := findBin([]string{"xray"}, "xray"); p != "" {
+		return p
+	}
+	return "xray"
+}
+
 func findBin(names []string, fallback string) string {
 	for _, name := range names {
 		if p, err := exec.LookPath(name); err == nil {
@@ -508,6 +553,9 @@ func detectManagedTool() string {
 	if p := findSingBoxBin(); p != "sing-box" {
 		return ToolSingBox
 	}
+	if p := findXrayBin(); p != "xray" {
+		return ToolXray
+	}
 	return ToolMihomo
 }
 
@@ -519,6 +567,11 @@ func defaultMihomoDir() string {
 func defaultSingBoxDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "sing-box")
+}
+
+func defaultXrayDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "xray")
 }
 
 func appDir() (string, error) {

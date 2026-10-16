@@ -50,20 +50,25 @@ func readStatus(s *config.Settings) status {
 		st.Usage = subscription.FormatUserInfo(sub.UserInfo)
 	}
 	if st.Running {
-		c, _ := liveClient(s)
-		if v, err := c.Version(); err == nil {
-			st.CoreVersion = v
-		} else {
-			st.Warnings = append(st.Warnings, "controller unreachable: "+apiErr(s, err).Error())
-		}
-		if cfg, err := c.Configs(); err == nil {
-			st.Mode = cfg.Mode
-			if s.Tool() == config.ToolMihomo {
-				st.Tun = cfg.Tun.Enable
-			}
-		}
-		if s.Tool() == config.ToolSingBox {
+		if s.Tool() == config.ToolXray {
+			st.CoreVersion = coreVersion(s)
 			st.Tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
+		} else {
+			c, _ := liveClient(s)
+			if v, err := c.Version(); err == nil {
+				st.CoreVersion = v
+			} else {
+				st.Warnings = append(st.Warnings, "controller unreachable: "+apiErr(s, err).Error())
+			}
+			if cfg, err := c.Configs(); err == nil {
+				st.Mode = cfg.Mode
+				if s.Tool() == config.ToolMihomo {
+					st.Tun = cfg.Tun.Enable
+				}
+			}
+			if s.Tool() == config.ToolSingBox {
+				st.Tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
+			}
 		}
 	}
 	if s.TunEnable {

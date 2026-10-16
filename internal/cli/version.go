@@ -1,17 +1,15 @@
 package cli
 
 import (
-	"context"
 	"fmt"
-	"os/exec"
 	"runtime"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"mihomo-king/internal/config"
+	"mihomo-king/internal/mihomo"
 )
 
 // Version overrides the version stamped by the Go toolchain:
@@ -95,16 +93,5 @@ func versionCmd() *cobra.Command {
 
 // coreVersion asks the managed binary for its version line.
 func coreVersion(s *config.Settings) string {
-	arg := "-v"
-	if s.Tool() == config.ToolSingBox {
-		arg = "version"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, s.Binary(), arg).Output()
-	if err != nil {
-		return fmt.Sprintf("%s (%s: %v)", s.ToolLabel(), s.Binary(), err)
-	}
-	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-	return line
+	return mihomo.CoreVersion(s)
 }

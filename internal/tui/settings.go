@@ -19,6 +19,7 @@ const (
 	settingTool       = "managed_tool"
 	settingMihomoBin  = "mihomo_bin"
 	settingSingBoxBin = "sing_box_bin"
+	settingXrayBin    = "xray_bin"
 	settingController = "controller"
 	settingMixedPort  = "mixed_port"
 	settingTunDevice  = "tun_device"
@@ -71,9 +72,12 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 			m.setErr("stop current tool before switching managed tool")
 			return m, nil
 		}
-		if m.settings.Tool() == config.ToolMihomo {
+		switch m.settings.Tool() {
+		case config.ToolMihomo:
 			m.settings.ManagedTool = config.ToolSingBox
-		} else {
+		case config.ToolSingBox:
+			m.settings.ManagedTool = config.ToolXray
+		default:
 			m.settings.ManagedTool = config.ToolMihomo
 		}
 		m.settings.NormalizeForTool()
@@ -130,6 +134,8 @@ func (m Model) settingValue(key string) string {
 		return m.settings.MihomoBin
 	case settingSingBoxBin:
 		return m.settings.SingBoxBin
+	case settingXrayBin:
+		return m.settings.XrayBin
 	case settingController:
 		return m.settings.Controller
 	case settingMixedPort:
@@ -158,6 +164,8 @@ func (m *Model) saveSettingValue(key, raw string) error {
 		m.settings.MihomoBin = raw
 	case settingSingBoxBin:
 		m.settings.SingBoxBin = raw
+	case settingXrayBin:
+		m.settings.XrayBin = raw
 	case settingController:
 		hostPort := strings.TrimPrefix(strings.TrimPrefix(raw, "http://"), "https://")
 		if _, _, err := net.SplitHostPort(hostPort); err != nil {
@@ -197,9 +205,10 @@ func (m *Model) saveSettingValue(key, raw string) error {
 
 func (m *Model) reloadSettings() {
 	rows := []list.Item{
-		item{title: "managed tool", desc: m.settings.ToolLabel() + "  ·  options: mihomo, sing-box  ·  enter to toggle", id: settingTool},
+		item{title: "managed tool", desc: m.settings.ToolLabel() + "  ·  options: mihomo, sing-box, xray  ·  enter to toggle", id: settingTool},
 		item{title: "mihomo binary", desc: binaryDesc(m.settings.MihomoBin), id: settingMihomoBin},
 		item{title: "sing-box binary", desc: binaryDesc(m.settings.SingBoxBin), id: settingSingBoxBin},
+		item{title: "xray binary", desc: binaryDesc(m.settings.XrayBin), id: settingXrayBin},
 		item{title: "controller", desc: m.settings.Controller, id: settingController},
 		item{title: "mixed port", desc: strconv.Itoa(m.settings.MixedPort), id: settingMixedPort},
 		item{title: "tun device", desc: m.settings.TunDevice, id: settingTunDevice},

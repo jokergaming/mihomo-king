@@ -88,18 +88,23 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 		running, pid := mihomo.Running(s)
 		msg := statusMsg{running: running, pid: pid, mode: s.Mode, tun: s.TunEnable}
 		if running {
-			c := api.New(controller, secret)
-			if v, err := c.Version(); err == nil {
-				msg.version = v
-			}
-			if cfg, err := c.Configs(); err == nil {
-				msg.mode = cfg.Mode
-				if s.Tool() == config.ToolMihomo {
-					msg.tun = cfg.Tun.Enable
-				}
-			}
-			if s.Tool() == config.ToolSingBox {
+			if s.Tool() == config.ToolXray {
+				msg.version = mihomo.CoreVersion(s)
 				msg.tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
+			} else {
+				c := api.New(controller, secret)
+				if v, err := c.Version(); err == nil {
+					msg.version = v
+				}
+				if cfg, err := c.Configs(); err == nil {
+					msg.mode = cfg.Mode
+					if s.Tool() == config.ToolMihomo {
+						msg.tun = cfg.Tun.Enable
+					}
+				}
+				if s.Tool() == config.ToolSingBox {
+					msg.tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
+				}
 			}
 		}
 		if s.TunEnable {
@@ -315,6 +320,14 @@ func loadGroupsCmd(s *config.Settings, note ...string) tea.Cmd {
 		if running, _ := mihomo.Running(s); !running {
 			return groupsMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
+		if s.Tool() == config.ToolXray {
+			groups, err := s.XrayGroups()
+			msg := groupsMsg{groups: groups, err: err}
+			if len(note) > 0 {
+				msg.note = note[0]
+			}
+			return msg
+		}
 		groups, err := api.New(controller, secret).Groups()
 		if errors.Is(err, api.ErrUnauthorized) {
 			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
@@ -346,6 +359,17 @@ func selectNodeAndLoadGroupsCmd(s *config.Settings, group, node string) tea.Cmd 
 		if running, _ := mihomo.Running(s); !running {
 			return groupsMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
+		if s.Tool() == config.ToolXray {
+			s.XrayNode = node
+			if err := s.Save(); err != nil {
+				return groupsMsg{err: err}
+			}
+			if err := mihomo.Reload(s); err != nil {
+				return groupsMsg{err: err}
+			}
+			groups, err := s.XrayGroups()
+			return groupsMsg{groups: groups, note: group + " → " + node, err: err}
+		}
 		c := api.New(controller, secret)
 		if err := c.SelectNode(group, node); err != nil {
 			if errors.Is(err, api.ErrUnauthorized) {
@@ -367,6 +391,13 @@ func testNodeCmd(s *config.Settings, group, node string) tea.Cmd {
 		if running, _ := mihomo.Running(s); !running {
 			return delayMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
+		if s.Tool() == config.ToolXray {
+			delay, err := s.XrayDelay(node, testURL, 5*time.Second)
+			if err != nil {
+				return delayMsg{err: err}
+			}
+			return delayMsg{group: group, node: node, delays: map[string]int{node: delay}}
+		}
 		delay, err := api.New(controller, secret).Delay(node, testURL, 5000)
 		if errors.Is(err, api.ErrUnauthorized) {
 			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
@@ -383,6 +414,13 @@ func testGroupCmd(s *config.Settings, group string) tea.Cmd {
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
 			return delayMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
+		}
+		if s.Tool() == config.ToolXray {
+			delays, err := s.XrayGroupDelay(group, testURL, 5*time.Second)
+			if err != nil {
+				return delayMsg{err: err}
+			}
+			return delayMsg{group: group, delays: delays}
 		}
 		c := api.New(controller, secret)
 		delays, err := c.GroupDelay(group, testURL, 5000)

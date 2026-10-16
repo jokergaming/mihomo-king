@@ -53,19 +53,23 @@ func (s *Settings) MergeConfig(subYAML []byte) ([]byte, error) {
 	return out, nil
 }
 
-// WriteActiveConfig merges subYAML and writes mihomo's runtime config.yaml.
+// WriteActiveConfig merges subYAML and writes runtime config according to active tool.
 func (s *Settings) WriteActiveConfig(subYAML []byte) error {
-	if s.Tool() == ToolSingBox {
+	switch s.Tool() {
+	case ToolSingBox:
 		return s.WriteSingBoxConfig(subYAML)
+	case ToolXray:
+		return s.WriteXrayConfig(subYAML)
+	default:
+		merged, err := s.MergeConfig(subYAML)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(s.MihomoDir, 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(s.ConfigPath(), merged, 0o644)
 	}
-	merged, err := s.MergeConfig(subYAML)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(s.MihomoDir, 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(s.ConfigPath(), merged, 0o644)
 }
 
 // WriteActiveFromStore writes the runtime config from the active subscription's
