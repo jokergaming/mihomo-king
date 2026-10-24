@@ -14,6 +14,7 @@ import (
 
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/core"
+	"mihomo-king/internal/geo"
 	"mihomo-king/internal/mihomo"
 )
 
@@ -23,6 +24,7 @@ const (
 	settingSingBoxBin = "sing_box_bin"
 	settingXrayBin    = "xray_bin"
 	settingCoreGet    = "core_download"
+	settingGeoGet     = "geo_download"
 	settingController = "controller"
 	settingMixedPort  = "mixed_port"
 	settingTunDevice  = "tun_device"
@@ -60,6 +62,8 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "g":
 			return m.beginCoreDownload()
+		case "G":
+			return m.beginGeoDownload()
 		}
 		if nm, cmd, handled := m.globalKey(k.String()); handled {
 			return nm, cmd
@@ -77,6 +81,9 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	}
 	if sel.id == settingCoreGet {
 		return m.beginCoreDownload()
+	}
+	if sel.id == settingGeoGet {
+		return m.beginGeoDownload()
 	}
 	if sel.id == settingTool {
 		if m.running {
@@ -126,6 +133,17 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editingSetting = false
 				m.settingInput.Blur()
 				return m.beginCoreCaps(tool, channel)
+			}
+			if m.settingKey == settingGeoGet {
+				tools, err := parseGeoDownload(m.settingInput.Value())
+				if err != nil {
+					m.setErr(err.Error())
+					return m, nil
+				}
+				m.editingSetting = false
+				m.settingInput.Blur()
+				m.setStatus("downloading shared geoip…")
+				return m, geoDownloadCmd(m.settings, tools)
 			}
 			if err := m.saveSettingValue(m.settingKey, strings.TrimSpace(m.settingInput.Value())); err != nil {
 				m.setErr(err.Error())
@@ -227,6 +245,7 @@ func (m *Model) saveSettingValue(key, raw string) error {
 func (m *Model) reloadSettings() {
 	rows := []list.Item{
 		item{title: "download core", desc: "release or alpha · replaces the configured binary · tab to choose", id: settingCoreGet},
+		item{title: "download geoip", desc: geoStatus(m.settings), id: settingGeoGet},
 		item{title: "managed tool", desc: m.settings.ToolLabel() + "  ·  options: mihomo, sing-box, xray  ·  enter to toggle", id: settingTool},
 		item{title: "mihomo binary", desc: binaryDesc(m.settings.MihomoBin), id: settingMihomoBin},
 		item{title: "sing-box binary", desc: binaryDesc(m.settings.SingBoxBin), id: settingSingBoxBin},
@@ -268,6 +287,8 @@ func (m Model) settingOptions(key string) []string {
 		return config.LogLevels(m.settings.Tool())
 	case settingCoreGet:
 		return coreDownloadOptions()
+	case settingGeoGet:
+		return geoDownloadOptions()
 	default:
 		return nil
 	}
@@ -278,8 +299,11 @@ func optionDesc(current string, options []string) string {
 }
 
 func (m Model) settingPrompt(key string) string {
-	if key == settingCoreGet {
+	switch key {
+	case settingCoreGet:
 		return "core channel (tab cycles mihomo/sing-box/xray and release/alpha)"
+	case settingGeoGet:
+		return "cores (tab cycles one core or all; one Loyalsoldier download is shared)"
 	}
 	if options := m.settingOptions(key); len(options) > 0 {
 		return fmt.Sprintf("%s (tab: %s)", key, strings.Join(options, " / "))
@@ -336,6 +360,47 @@ func (m Model) beginCoreDownload() (tea.Model, tea.Cmd) {
 	m.settingInput.SetValue(m.settings.Tool() + " " + core.ChannelRelease)
 	m.settingInput.CursorEnd()
 	return m, m.settingInput.Focus()
+}
+
+func (m Model) beginGeoDownload() (tea.Model, tea.Cmd) {
+	m.editingSetting = true
+	m.settingKey = settingGeoGet
+	m.settingInput.Placeholder = "all"
+	m.settingInput.SetValue("all")
+	m.settingInput.CursorEnd()
+	return m, m.settingInput.Focus()
+}
+
+func geoDownloadOptions() []string {
+	return []string{"all", config.ToolMihomo, config.ToolSingBox, config.ToolXray}
+}
+
+func parseGeoDownload(raw string) ([]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "all" {
+		return nil, nil
+	}
+	if _, err := geo.FilesFor(raw); err != nil {
+		return nil, fmt.Errorf("choose one of: %s", strings.Join(geoDownloadOptions(), ", "))
+	}
+	return []string{raw}, nil
+}
+
+func geoStatus(s *config.Settings) string {
+	var present []string
+	if _, err := os.Stat(filepath.Join(s.MihomoDir, "GeoIP.dat")); err == nil {
+		present = append(present, "mihomo")
+	}
+	if _, err := os.Stat(filepath.Join(s.SingBoxDir, "geoip-cn.srs")); err == nil {
+		present = append(present, "sing-box")
+	}
+	if _, err := os.Stat(filepath.Join(s.XrayDir, "geoip.dat")); err == nil {
+		present = append(present, "xray")
+	}
+	if len(present) == 0 {
+		return "Loyalsoldier geoip · one download, shared by every core · not installed"
+	}
+	return "Loyalsoldier geoip · installed for " + strings.Join(present, ", ")
 }
 
 func coreDownloadOptions() []string {

@@ -461,7 +461,7 @@ func (m Model) help() string {
 		if m.settingsList.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "enter edit/download · g download core · r refresh · / filter · tab/1/2/3/4 switch · q quit"
+		return "enter edit/download · g download core · G download geoip · r refresh · / filter · tab/1/2/3/4 switch · q quit"
 	default:
 		switch m.tunStage {
 		case tunAskForeign:

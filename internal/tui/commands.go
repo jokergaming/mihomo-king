@@ -13,6 +13,7 @@ import (
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/core"
+	"mihomo-king/internal/geo"
 	"mihomo-king/internal/mihomo"
 	"mihomo-king/internal/subscription"
 )
@@ -206,6 +207,29 @@ func coreDownloadCmd(s *config.Settings, tool, channel, password string) tea.Cmd
 			return actionMsg{note: core.Note(tool, res), err: err}
 		}
 		return actionMsg{note: core.Note(tool, res)}
+	}
+}
+
+func geoDownloadCmd(s *config.Settings, tools []string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		res, err := geo.Install(ctx, s, tools, true, func(tool string) bool {
+			if tool != s.Tool() {
+				return false
+			}
+			running, _ := mihomo.Running(s)
+			return running
+		}, func(string) error {
+			return mihomo.Restart(s)
+		})
+		if err != nil {
+			if res == nil {
+				return actionMsg{err: err}
+			}
+			return actionMsg{note: geo.Note(res), err: err}
+		}
+		return actionMsg{note: geo.Note(res)}
 	}
 }
 

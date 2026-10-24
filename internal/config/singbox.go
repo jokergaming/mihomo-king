@@ -107,6 +107,7 @@ func (s *Settings) SingBoxConfig(subYAML []byte) (map[string]any, error) {
 		"auto_detect_interface":   s.TunEnable,
 		"final":                   final,
 	}
+	applySingBoxGeo(route, s.GeoMixin(nil))
 
 	return map[string]any{
 		"log": map[string]any{

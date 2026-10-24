@@ -12,6 +12,8 @@ import (
 
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/core"
+	"mihomo-king/internal/geo"
+	"mihomo-king/internal/mihomo"
 )
 
 func coreCmd() *cobra.Command {
@@ -100,6 +102,51 @@ func corePassword(cmd *cobra.Command) (string, error) {
 		return "", fmt.Errorf("sudo password required to set cap_net_admin,cap_net_raw=ep")
 	}
 	return string(pw), nil
+}
+
+func geoCmd() *cobra.Command {
+	var restart bool
+	cmd := &cobra.Command{
+		Use:   "geo [mihomo|sing-box|xray...]",
+		Short: "Download one shared geoip release for the managed cores",
+		Long: `Download the Loyalsoldier geoip release once and install the files each
+managed core loads. mihomo gets GeoIP.dat, geoip.metadb and ASN.mmdb.
+xray gets geoip.dat in its data directory. sing-box gets one .srs rule-set
+per category, compiled from that same geoip.dat.
+
+With no core named, every managed core is updated. A running named core is
+restarted so it reloads the files. A subscription that already sets its own
+geo database or download URL is left unchanged.`,
+		Example: `  mihomo-king geo
+  mihomo-king geo mihomo xray
+  mihomo-king geo sing-box --restart=false`,
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeCores,
+		RunE: withSettings(func(cmd *cobra.Command, s *config.Settings, args []string) error {
+			for _, tool := range args {
+				if _, err := geo.FilesFor(tool); err != nil {
+					return err
+				}
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Minute)
+			defer cancel()
+			res, err := geo.Install(ctx, s, args, restart, func(tool string) bool {
+				if tool != s.Tool() {
+					return false
+				}
+				running, _ := mihomo.Running(s)
+				return running
+			}, func(string) error {
+				return mihomo.Restart(s)
+			})
+			if res != nil {
+				fmt.Fprintln(cmd.OutOrStdout(), geo.Note(res))
+			}
+			return err
+		}),
+	}
+	cmd.Flags().BoolVar(&restart, "restart", true, "restart a running core after replacing its geoip files")
+	return cmd
 }
 
 func completeCores(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {

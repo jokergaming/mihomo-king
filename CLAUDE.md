@@ -162,4 +162,13 @@ root model with a `screen`/state enum that delegates `Update`/`View` to the acti
 - `~/.config/mihomo/` is mihomo-king's data dir (`cache.db`, `geoip.metadb`); the merged active
   config is written there as `config.yaml`. Its `GeoSite.dat` must be MetaCubeX's `geosite.dat`
   (v2fly's `dlc.dat` lacks `gfw`, which several subscriptions use in `dns.fallback-filter`).
-  Subscription switches and starts are validated with `mihomo -t` first (`mihomo.CheckActive`).
+  Do not download or replace `GeoSite.dat`. Subscription switches and starts are validated with
+  `mihomo -t` first (`mihomo.CheckActive`).
+- Shared geoip comes from one [Loyalsoldier/geoip](https://github.com/Loyalsoldier/geoip) download
+  (`mihomo-king geo`, settings `G`). mihomo gets `GeoIP.dat`, `Country.mmdb` installed as
+  `geoip.metadb` (an existing metadb wins mihomo's search), and `ASN.mmdb`. xray gets `geoip.dat`
+  and `XRAY_LOCATION_ASSET` only when that file exists. sing-box cannot load the dat, so the same
+  download is compiled into local `.srs` rule-sets. Mixin sets mihomo `geodata-mode` and
+  `geo-auto-update: false` — `geox-url` is HTTP-only, never a local path — and registers sing-box
+  local rule-sets without adding route rules. A subscription that already sets `geox-url` or
+  `geo-auto-update` is left alone. Only the active running core is restarted.

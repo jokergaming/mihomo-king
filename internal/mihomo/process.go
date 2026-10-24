@@ -88,6 +88,7 @@ func Start(s *config.Settings) error {
 	defer logf.Close()
 
 	cmd := exec.Command(s.Binary(), startArgs(s)...)
+	cmd.Env = processEnv(s)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // own process group: outlive the TUI
@@ -175,7 +176,9 @@ func CheckConfig(s *config.Settings, path string) error {
 	case config.ToolXray:
 		args = []string{"run", "-test", "-c", path}
 	}
-	out, err := exec.CommandContext(ctx, s.Binary(), args...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, s.Binary(), args...)
+	cmd.Env = processEnv(s)
+	out, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil
 	}
@@ -327,6 +330,18 @@ func controllerPortBusy(controller string) bool {
 	}
 	_ = ln.Close()
 	return false
+}
+
+// processEnv points xray at the shared geoip.dat. Xray has no config field or
+// flag for that directory; it reads XRAY_LOCATION_ASSET before opening geoip.dat.
+func processEnv(s *config.Settings) []string {
+	if s.Tool() != config.ToolXray || s.XrayDir == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(s.XrayDir, "geoip.dat")); err != nil {
+		return nil
+	}
+	return append(os.Environ(), "XRAY_LOCATION_ASSET="+s.XrayDir)
 }
 
 func startArgs(s *config.Settings) []string {

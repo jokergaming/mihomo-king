@@ -32,6 +32,7 @@ func (s *Settings) MergeConfig(subYAML []byte) ([]byte, error) {
 	root["mode"] = s.Mode
 	root["log-level"] = s.LogLevel
 	root["tun"] = tunBlock(s.TunEnable, s.TunDevice)
+	applyMihomoGeo(root, s.GeoMixin(root))
 
 	// The subscription often carries its own listeners (the provider generates
 	// them for a standalone setup). We expose mixed-port only; anything else
