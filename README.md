@@ -39,6 +39,7 @@ Information:  status [--json] · version · paths [settings|subs|dir|config|log|
               subs [--urls] · check [sub] · log [-n N] [-f]
 Control:      start · stop · restart · use <sub> · update [--all] [--apply] [sub...]
               tun [on|off|toggle] [--force] · mode [rule|global|direct]
+              core download [mihomo|sing-box|xray] [--channel release|alpha]
 Proxies:      groups [-s] · nodes <group> · select <group> <node>
               chain [<entry> <exit>|off]
               delay [--url URL] [--timeout 5s] <group|node> [node]
@@ -48,6 +49,8 @@ Proxies:      groups [-s] · nodes <group> · select <group> <node>
 mihomo-king -v                        # version (also: mihomo-king version for build + core info)
 mihomo-king status
 mihomo-king use provider-a            # validated with mihomo -t, rolled back if the reload fails
+mihomo-king core download             # replace the managed core at its configured path
+mihomo-king core download xray --channel alpha
 mihomo-king select Proxy "HK 02"
 mihomo-king delay Proxy              # every member, fastest first
 mihomo-king chain "HK 01" "US 02"     # connect to US 02 through HK 01
@@ -55,6 +58,16 @@ mihomo-king select Proxy "mihomo-king Chain" # route that group through the chai
 mihomo-king chain off                 # remove the generated chain node
 tail -f "$(mihomo-king paths log)"
 ```
+
+`core download` installs mihomo, sing-box, or xray from GitHub. `--channel release`
+uses the latest stable release; `--channel alpha` uses the latest alpha build
+(mihomo's rolling `Prerelease-Alpha` tag, sing-box's newest `alpha` tag, or
+xray's newest prerelease). The file already configured for that core is replaced
+in place, so a custom path stays custom. The command prints the GitHub release
+page afterwards — open it to see what changed. If that core is running, it is
+stopped before the file is replaced and started again afterwards. Replacing the
+file clears capabilities, so the command then sets `cap_net_admin,cap_net_raw=ep`
+on the installed binary, asking for a sudo password when it is not already root.
 
 The chain uses two concrete nodes from the active subscription or local nodes.
 One chain is saved at a time for the active subscription and becomes available

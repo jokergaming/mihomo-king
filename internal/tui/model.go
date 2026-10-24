@@ -31,6 +31,7 @@ const (
 	tunIdle        tunStage = iota
 	tunAskForeign           // another TUN is up: delete it / continue / cancel
 	tunAskPassword          // sudo password needed (delete foreign TUN or setcap)
+	tunAskCoreCaps          // sudo password for setcap after a core download
 )
 
 // addForm is the input form open on the subscriptions screen, if any.
@@ -96,6 +97,13 @@ type Model struct {
 	editingSetting bool
 	settingKey     string
 	settingInput   textinput.Model
+	coreNotice     string
+	pendingCore    coreDownload
+}
+
+type coreDownload struct {
+	tool    string
+	channel string
 }
 
 // item is a generic list row. id holds the underlying name (title may be decorated).
@@ -188,9 +196,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionMsg:
 		if msg.err != nil {
+			m.coreNotice = ""
 			m.setErr(msg.err.Error())
 		} else {
 			m.setStatus(msg.note)
+			if strings.HasPrefix(msg.note, "installed ") {
+				m.coreNotice = msg.note
+			}
 		}
 		if m.screen == screenSubs {
 			m.reloadSubs()
@@ -437,6 +449,9 @@ func (m Model) help() string {
 		}
 		return "enter open/select · c set chain · x clear chain · l test · a test group · u set url · esc back · r reload · / filter · tab/1/2/3/4 switch · q quit"
 	case screenSettings:
+		if m.tunStage == tunAskCoreCaps {
+			return "enter confirm · esc cancel"
+		}
 		if m.editingSetting {
 			if len(m.settingOptions(m.settingKey)) > 0 {
 				return "tab complete · enter save · esc cancel"
@@ -446,7 +461,7 @@ func (m Model) help() string {
 		if m.settingsList.FilterState() == list.Filtering {
 			return "type to filter · enter apply · esc cancel"
 		}
-		return "enter edit/toggle · r refresh · / filter · tab/1/2/3/4 switch · q quit"
+		return "enter edit/download · g download core · r refresh · / filter · tab/1/2/3/4 switch · q quit"
 	default:
 		switch m.tunStage {
 		case tunAskForeign:

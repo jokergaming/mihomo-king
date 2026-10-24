@@ -256,6 +256,16 @@ func NetCaps(bin string) (string, bool) {
 	return strings.TrimSpace(string(out)), true
 }
 
+// HasNetCaps reports whether bin already has the capabilities TUN needs.
+// The second result is false when getcap cannot inspect the file.
+func HasNetCaps(bin string) (bool, bool) {
+	caps, ok := NetCaps(bin)
+	if !ok {
+		return false, false
+	}
+	return strings.Contains(caps, "cap_net_admin") && strings.Contains(caps, "cap_net_raw"), true
+}
+
 // ForeignTunDevices lists TUN interfaces that are up but aren't ours (e.g.
 // another clash instance's "Meta"). Two TUNs fight over routes/DNS, so the
 // dashboard warns before our TUN is enabled alongside one. Best-effort via

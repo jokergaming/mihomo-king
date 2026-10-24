@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mihomo-king/internal/config"
+	"mihomo-king/internal/core"
 	"mihomo-king/internal/mihomo"
 )
 
@@ -20,6 +22,7 @@ const (
 	settingMihomoBin  = "mihomo_bin"
 	settingSingBoxBin = "sing_box_bin"
 	settingXrayBin    = "xray_bin"
+	settingCoreGet    = "core_download"
 	settingController = "controller"
 	settingMixedPort  = "mixed_port"
 	settingTunDevice  = "tun_device"
@@ -30,6 +33,9 @@ const (
 )
 
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.tunStage == tunAskCoreCaps {
+		return m.updateCoreCapPrompt(msg)
+	}
 	if m.editingSetting {
 		return m.updateSettingInput(msg)
 	}
@@ -52,6 +58,8 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reloadSettings()
 			m.setStatus("settings refreshed")
 			return m, nil
+		case "g":
+			return m.beginCoreDownload()
 		}
 		if nm, cmd, handled := m.globalKey(k.String()); handled {
 			return nm, cmd
@@ -66,6 +74,9 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	sel, ok := m.settingsList.SelectedItem().(item)
 	if !ok {
 		return m, nil
+	}
+	if sel.id == settingCoreGet {
+		return m.beginCoreDownload()
 	}
 	if sel.id == settingTool {
 		if m.running {
@@ -106,6 +117,16 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("cancelled")
 			return m, nil
 		case "enter":
+			if m.settingKey == settingCoreGet {
+				tool, channel, err := parseCoreDownload(m.settingInput.Value())
+				if err != nil {
+					m.setErr(err.Error())
+					return m, nil
+				}
+				m.editingSetting = false
+				m.settingInput.Blur()
+				return m.beginCoreCaps(tool, channel)
+			}
 			if err := m.saveSettingValue(m.settingKey, strings.TrimSpace(m.settingInput.Value())); err != nil {
 				m.setErr(err.Error())
 				return m, nil
@@ -205,6 +226,7 @@ func (m *Model) saveSettingValue(key, raw string) error {
 
 func (m *Model) reloadSettings() {
 	rows := []list.Item{
+		item{title: "download core", desc: "release or alpha · replaces the configured binary · tab to choose", id: settingCoreGet},
 		item{title: "managed tool", desc: m.settings.ToolLabel() + "  ·  options: mihomo, sing-box, xray  ·  enter to toggle", id: settingTool},
 		item{title: "mihomo binary", desc: binaryDesc(m.settings.MihomoBin), id: settingMihomoBin},
 		item{title: "sing-box binary", desc: binaryDesc(m.settings.SingBoxBin), id: settingSingBoxBin},
@@ -222,11 +244,18 @@ func (m *Model) reloadSettings() {
 }
 
 func (m Model) viewSettings() string {
+	body := m.settingsList.View()
+	if m.coreNotice != "" {
+		body += "\n\n" + okStyle.Render(m.coreNotice)
+	}
+	if m.tunStage == tunAskCoreCaps {
+		return body + "\n\n  sudo password — set cap_net_admin,cap_net_raw=ep after download:\n  " + m.pwInput.View()
+	}
 	if !m.editingSetting {
-		return m.settingsList.View()
+		return body
 	}
 	return fmt.Sprintf("%s\n\n%s\n%s",
-		m.settingsList.View(),
+		body,
 		labelStyle.Render(m.settingPrompt(m.settingKey)),
 		m.settingInput.View())
 }
@@ -237,6 +266,8 @@ func (m Model) settingOptions(key string) []string {
 		return config.Modes(m.settings.Tool())
 	case settingLogLevel:
 		return config.LogLevels(m.settings.Tool())
+	case settingCoreGet:
+		return coreDownloadOptions()
 	default:
 		return nil
 	}
@@ -247,10 +278,85 @@ func optionDesc(current string, options []string) string {
 }
 
 func (m Model) settingPrompt(key string) string {
+	if key == settingCoreGet {
+		return "core channel (tab cycles mihomo/sing-box/xray and release/alpha)"
+	}
 	if options := m.settingOptions(key); len(options) > 0 {
 		return fmt.Sprintf("%s (tab: %s)", key, strings.Join(options, " / "))
 	}
 	return key
+}
+
+func (m Model) beginCoreCaps(tool, channel string) (tea.Model, tea.Cmd) {
+	m.pendingCore = coreDownload{tool: tool, channel: channel}
+	if os.Geteuid() == 0 {
+		m.setStatus("downloading " + tool + " " + channel + "…")
+		return m, coreDownloadCmd(m.settings, tool, channel, "")
+	}
+	m.tunStage = tunAskCoreCaps
+	m.pwInput.Reset()
+	m.pwInput.Placeholder = "sudo password"
+	return m, m.pwInput.Focus()
+}
+
+func (m Model) updateCoreCapPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
+	k, isKey := msg.(tea.KeyMsg)
+	if isKey {
+		switch k.String() {
+		case "esc":
+			m.tunStage = tunIdle
+			m.pwInput.Reset()
+			m.pendingCore = coreDownload{}
+			m.setStatus("cancelled")
+			return m, nil
+		case "enter":
+			pw := m.pwInput.Value()
+			m.pwInput.Reset()
+			m.tunStage = tunIdle
+			if pw == "" {
+				m.pendingCore = coreDownload{}
+				m.setErr("password required (esc to cancel)")
+				return m, nil
+			}
+			tool, channel := m.pendingCore.tool, m.pendingCore.channel
+			m.pendingCore = coreDownload{}
+			m.setStatus("downloading " + tool + " " + channel + "…")
+			return m, coreDownloadCmd(m.settings, tool, channel, pw)
+		}
+	}
+	var cmd tea.Cmd
+	m.pwInput, cmd = m.pwInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) beginCoreDownload() (tea.Model, tea.Cmd) {
+	m.editingSetting = true
+	m.settingKey = settingCoreGet
+	m.settingInput.Placeholder = m.settings.Tool() + " " + core.ChannelRelease
+	m.settingInput.SetValue(m.settings.Tool() + " " + core.ChannelRelease)
+	m.settingInput.CursorEnd()
+	return m, m.settingInput.Focus()
+}
+
+func coreDownloadOptions() []string {
+	var options []string
+	for _, tool := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {
+		for _, channel := range core.Channels() {
+			options = append(options, tool+" "+channel)
+		}
+	}
+	return options
+}
+
+func parseCoreDownload(raw string) (string, string, error) {
+	tool, channel, ok := strings.Cut(strings.TrimSpace(raw), " ")
+	if !ok || !core.ValidChannel(channel) {
+		return "", "", fmt.Errorf("choose one of: %s", strings.Join(coreDownloadOptions(), ", "))
+	}
+	if _, err := core.SpecFor(tool); err != nil {
+		return "", "", err
+	}
+	return tool, channel, nil
 }
 
 func nextSettingOption(current string, options []string) string {

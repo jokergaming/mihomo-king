@@ -67,7 +67,7 @@ routing mode and node selection. Run it without a command to open the TUI.`,
 		c.GroupID = groupInfo
 		root.AddCommand(c)
 	}
-	for _, c := range []*cobra.Command{startCmd(), stopCmd(), restartCmd(), useCmd(), updateCmd(), tunCmd(), modeCmd()} {
+	for _, c := range []*cobra.Command{startCmd(), stopCmd(), restartCmd(), useCmd(), updateCmd(), tunCmd(), modeCmd(), coreCmd()} {
 		c.GroupID = groupControl
 		root.AddCommand(c)
 	}

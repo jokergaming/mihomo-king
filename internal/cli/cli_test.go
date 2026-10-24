@@ -62,6 +62,8 @@ func TestArgValidation(t *testing.T) {
 		{"use"},
 		{"use", "missing"},
 		{"check", "missing"},
+		{"core", "download", "not-a-core"},
+		{"core", "download", "--channel", "nightly"},
 		{"nosuch"},
 	} {
 		if _, err := run(t, args...); err == nil {

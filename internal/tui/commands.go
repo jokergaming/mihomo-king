@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
+	"mihomo-king/internal/core"
 	"mihomo-king/internal/mihomo"
 	"mihomo-king/internal/subscription"
 )
@@ -187,6 +189,23 @@ func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd
 func switchSubCmd(s *config.Settings, name string) tea.Cmd {
 	return func() tea.Msg {
 		return subSwitchedMsg{name: name, err: mihomo.SwitchSub(s, name)}
+	}
+}
+
+// coreDownloadCmd replaces the configured binary for tool. A running core is
+// stopped first and started again after the same path has been overwritten.
+func coreDownloadCmd(s *config.Settings, tool, channel, password string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		res, err := core.Install(ctx, s, tool, channel, password, true)
+		if err != nil {
+			if res == nil {
+				return actionMsg{err: err}
+			}
+			return actionMsg{note: core.Note(tool, res), err: err}
+		}
+		return actionMsg{note: core.Note(tool, res)}
 	}
 }
 
