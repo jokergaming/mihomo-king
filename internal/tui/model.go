@@ -61,6 +61,9 @@ type Model struct {
 	liveTun    bool
 	capWarn    bool
 	foreignTun []string
+	liveNodes  []string
+	nodeErr    error
+	coreBusy   bool
 
 	// tun enable flow (dashboard modal)
 	tunStage   tunStage
@@ -189,10 +192,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.running, m.pid, m.version = msg.running, msg.pid, msg.version
 		m.liveMode, m.liveTun, m.capWarn = msg.mode, msg.tun, msg.capWarn
 		m.foreignTun = msg.foreignTun
+		m.liveNodes, m.nodeErr = msg.nodes, msg.nodeErr
 		return m, nil
 
 	case tickMsg:
 		return m, tea.Batch(refreshStatusCmd(m.settings), tickCmd())
+
+	case coreActionMsg:
+		m.coreBusy = false
+		return m.Update(msg.actionMsg)
 
 	case actionMsg:
 		if msg.err != nil {
@@ -469,7 +477,7 @@ func (m Model) help() string {
 		case tunAskPassword:
 			return "enter confirm · esc cancel"
 		}
-		return "s start · x stop · t toggle tun · r refresh · tab/2/3/4 switch · q quit"
+		return "s start · x stop · R restart · t toggle tun · r refresh · tab/2/3/4 switch · q quit"
 	}
 }
 

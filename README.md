@@ -17,6 +17,10 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - Create an entry-to-exit proxy chain and select it in a manual proxy group.
 - Test node and group latency with a configurable test URL.
 
+主界面显示当前运行时的节点选择和协议类型，嵌套策略组会展开到最终节点；
+规则模式分别列出各策略组，全局模式显示 `GLOBAL` 的选择，直连模式显示 `DIRECT`。
+按 `R` 重启当前管理的核心（停止时会启动），按 `r` 刷新状态；状态也会每 3 秒自动刷新。
+
 ## Build & run
 
 ```bash

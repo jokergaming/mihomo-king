@@ -17,6 +17,13 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+	if m.coreBusy {
+		switch k.String() {
+		case "s", "x", "R", "t":
+			m.setStatus("core operation in progress…")
+			return m, nil
+		}
+	}
 	switch k.String() {
 	case "s":
 		if m.running {
@@ -24,6 +31,7 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setStatus("starting…")
+		m.coreBusy = true
 		return m, startCmd(m.settings)
 	case "x":
 		if !m.running {
@@ -31,7 +39,12 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setStatus("stopping…")
+		m.coreBusy = true
 		return m, stopCmd(m.settings)
+	case "R":
+		m.setStatus("restarting…")
+		m.coreBusy = true
+		return m, restartCmd(m.settings)
 	case "t":
 		if m.settings.TunEnable {
 			// disabling needs no privileges and no checks
@@ -154,6 +167,22 @@ func (m Model) viewDashboard() string {
 		active = dimStyle.Render("(none — press 2, pick one, press enter to activate)")
 	}
 	row("subscription", active)
+	switch {
+	case !m.running:
+		row("nodes", dimStyle.Render("(not running)"))
+	case m.nodeErr != nil:
+		row("nodes", errStyle.Render("unavailable: "+m.nodeErr.Error()))
+	case len(m.liveNodes) == 0:
+		row("nodes", dimStyle.Render("(no active proxy groups)"))
+	default:
+		for i, node := range m.liveNodes {
+			label := ""
+			if i == 0 {
+				label = "nodes"
+			}
+			row(label, node)
+		}
+	}
 	row("controller", m.settings.Controller)
 	row("binary", m.settings.Binary())
 	row("config", m.settings.ConfigPath())

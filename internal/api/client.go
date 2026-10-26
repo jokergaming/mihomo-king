@@ -93,25 +93,34 @@ func (c *Client) Configs() (*Configs, error) {
 	return &cfg, nil
 }
 
-// Groups returns all proxy groups in the runtime, in config order (mihomo's
-// GLOBAL meta-group lists them in the order they were defined). GLOBAL itself
-// is omitted. Only Selector groups accept a node switch; others (URLTest,
-// Fallback…) pick automatically but are still useful to inspect.
-func (c *Client) Groups() ([]Group, error) {
+// Proxies returns a runtime snapshot, including GLOBAL and concrete nodes.
+func (c *Client) Proxies() (map[string]Proxy, error) {
 	var resp struct {
 		Proxies map[string]Proxy `json:"proxies"`
 	}
 	if err := c.get("/proxies", &resp); err != nil {
 		return nil, err
 	}
+	return resp.Proxies, nil
+}
+
+// Groups returns all proxy groups in the runtime, in config order (mihomo's
+// GLOBAL meta-group lists them in the order they were defined). GLOBAL itself
+// is omitted. Only Selector groups accept a node switch; others (URLTest,
+// Fallback…) pick automatically but are still useful to inspect.
+func (c *Client) Groups() ([]Group, error) {
+	proxies, err := c.Proxies()
+	if err != nil {
+		return nil, err
+	}
 	order := map[string]int{}
-	if g, ok := resp.Proxies["GLOBAL"]; ok {
+	if g, ok := proxies["GLOBAL"]; ok {
 		for i, name := range g.All {
 			order[name] = i
 		}
 	}
 	var groups []Group
-	for name, p := range resp.Proxies {
+	for name, p := range proxies {
 		if name == "GLOBAL" || len(p.All) == 0 {
 			continue
 		}

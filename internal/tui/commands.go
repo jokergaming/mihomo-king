@@ -28,6 +28,8 @@ type statusMsg struct {
 	tun        bool
 	capWarn    bool
 	foreignTun []string // other live TUN devices (e.g. another clash's "Meta")
+	nodes      []string
+	nodeErr    error
 }
 
 type groupsMsg struct {
@@ -65,6 +67,8 @@ type actionMsg struct {
 	err  error
 }
 
+type coreActionMsg struct{ actionMsg }
+
 type subSwitchedMsg struct {
 	name string
 	err  error
@@ -94,6 +98,7 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 			if s.Tool() == config.ToolXray {
 				msg.version = mihomo.CoreVersion(s)
 				msg.tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
+				msg.nodes, msg.nodeErr = xrayNodeRoutes(s.ConfigPath())
 			} else {
 				c := api.New(controller, secret)
 				if v, err := c.Version(); err == nil {
@@ -104,6 +109,17 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 					if s.Tool() == config.ToolMihomo {
 						msg.tun = cfg.Tun.Enable
 					}
+					if cfg.Mode == "direct" {
+						msg.nodes = []string{"DIRECT"}
+					} else {
+						proxies, err := c.Proxies()
+						msg.nodeErr = err
+						if err == nil {
+							msg.nodes = proxyNodeRoutes(proxies, cfg.Mode)
+						}
+					}
+				} else {
+					msg.nodeErr = err
 				}
 				if s.Tool() == config.ToolSingBox {
 					msg.tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
@@ -121,18 +137,27 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 func startCmd(s *config.Settings) tea.Cmd {
 	return func() tea.Msg {
 		if err := mihomo.Start(s); err != nil {
-			return actionMsg{err: err}
+			return coreActionMsg{actionMsg{err: err}}
 		}
-		return actionMsg{note: s.ToolLabel() + " started"}
+		return coreActionMsg{actionMsg{note: s.ToolLabel() + " started"}}
 	}
 }
 
 func stopCmd(s *config.Settings) tea.Cmd {
 	return func() tea.Msg {
 		if err := mihomo.Stop(s); err != nil {
-			return actionMsg{err: err}
+			return coreActionMsg{actionMsg{err: err}}
 		}
-		return actionMsg{note: s.ToolLabel() + " stopped"}
+		return coreActionMsg{actionMsg{note: s.ToolLabel() + " stopped"}}
+	}
+}
+
+func restartCmd(s *config.Settings) tea.Cmd {
+	return func() tea.Msg {
+		if err := mihomo.Restart(s); err != nil {
+			return coreActionMsg{actionMsg{err: err}}
+		}
+		return coreActionMsg{actionMsg{note: s.ToolLabel() + " restarted"}}
 	}
 }
 
