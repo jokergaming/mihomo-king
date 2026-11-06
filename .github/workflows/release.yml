@@ -216,7 +216,7 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
           prerelease: ${{ needs.prepare.outputs.tag == 'nightly' }}
-          make_latest: ${{ needs.prepare.outputs.tag == 'nightly' && 'false' || 'legacy' }}
+          make_latest: ${{ needs.prepare.outputs.tag == 'nightly' && 'false' || 'true' }}
           body: ${{ needs.prepare.outputs.tag == 'nightly' && format('Rolling build from main at commit {0}.', needs.prepare.outputs.sha) || '' }}
           generate_release_notes: ${{ needs.prepare.outputs.tag != 'nightly' }}
           overwrite_files: true
