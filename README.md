@@ -21,6 +21,12 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 规则模式分别列出各策略组，全局模式显示 `GLOBAL` 的选择，直连模式显示 `DIRECT`。
 按 `R` 重启当前管理的核心（停止时会启动），按 `r` 刷新状态；状态也会每 3 秒自动刷新。
 
+设置页（`4`）提供「autostart / 开机启动」，默认关闭，选中后按 `Enter` 切换。
+开启后在下次登录 Linux 桌面时，按保存的订阅、核心和 TUN 设置后台启动代理，不弹出 TUI。
+开关保存在 `${XDG_CONFIG_HOME:-~/.config}/autostart/mihomo-king.desktop`，重新打开程序仍会保留；
+关闭只取消自动启动，不停止正在运行的代理。请从固定位置的可执行文件开启，勿使用 `go run`；
+移动程序后需重新关闭、开启，以更新路径。需要 TUN 时，请提前授予核心相应权限。
+
 ## Build & run
 
 ```bash

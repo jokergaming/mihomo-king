@@ -32,6 +32,7 @@ const (
 	settingTestURL    = "test_url"
 	settingMode       = "mode"
 	settingLogLevel   = "log_level"
+	settingAutostart  = "autostart"
 )
 
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -57,9 +58,7 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return m.settingsEnter()
 		case "r":
-			m.reloadSettings()
-			m.setStatus("settings refreshed")
-			return m, nil
+			return m.beginAutostart(false)
 		case "g":
 			return m.beginCoreDownload()
 		case "G":
@@ -84,6 +83,9 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	}
 	if sel.id == settingGeoGet {
 		return m.beginGeoDownload()
+	}
+	if sel.id == settingAutostart {
+		return m.beginAutostart(true)
 	}
 	if sel.id == settingTool {
 		if m.running {
@@ -247,6 +249,7 @@ func (m *Model) reloadSettings() {
 		item{title: "download core", desc: "release or alpha · replaces the configured binary · tab to choose", id: settingCoreGet},
 		item{title: "download geoip", desc: geoStatus(m.settings), id: settingGeoGet},
 		item{title: "managed tool", desc: m.settings.ToolLabel() + "  ·  options: mihomo, sing-box, xray  ·  enter to toggle", id: settingTool},
+		item{title: "autostart / 开机启动", desc: m.autostartDescription(), id: settingAutostart},
 		item{title: "mihomo binary", desc: binaryDesc(m.settings.MihomoBin), id: settingMihomoBin},
 		item{title: "sing-box binary", desc: binaryDesc(m.settings.SingBoxBin), id: settingSingBoxBin},
 		item{title: "xray binary", desc: binaryDesc(m.settings.XrayBin), id: settingXrayBin},

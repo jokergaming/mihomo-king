@@ -96,12 +96,15 @@ type Model struct {
 	chainEntry     string
 
 	// settings
-	settingsList   list.Model
-	editingSetting bool
-	settingKey     string
-	settingInput   textinput.Model
-	coreNotice     string
-	pendingCore    coreDownload
+	settingsList     list.Model
+	editingSetting   bool
+	settingKey       string
+	settingInput     textinput.Model
+	coreNotice       string
+	pendingCore      coreDownload
+	autostartEnabled bool
+	autostartLoaded  bool
+	autostartBusy    bool
 }
 
 type coreDownload struct {
@@ -201,6 +204,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case coreActionMsg:
 		m.coreBusy = false
 		return m.Update(msg.actionMsg)
+
+	case autostartMsg:
+		m.autostartBusy = false
+		m.autostartLoaded = msg.err == nil
+		if msg.err != nil {
+			m.setErr("autostart: " + msg.err.Error())
+		} else {
+			m.autostartEnabled = msg.enabled
+			if msg.changed {
+				m.setStatus("autostart " + autostartState(msg.enabled))
+			} else {
+				m.setStatus("settings refreshed")
+			}
+		}
+		m.reloadSettings()
+		return m, nil
 
 	case actionMsg:
 		if msg.err != nil {
@@ -375,8 +394,7 @@ func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 	case screenNodes:
 		return m, loadGroupsCmd(m.settings)
 	case screenSettings:
-		m.reloadSettings()
-		return m, nil
+		return m.beginAutostart(false)
 	default:
 		return m, refreshStatusCmd(m.settings)
 	}
