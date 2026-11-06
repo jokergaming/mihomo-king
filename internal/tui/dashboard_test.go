@@ -32,22 +32,22 @@ func TestDashboardNodeRoutes(t *testing.T) {
 		{"direct", []string{"DIRECT"}},
 	} {
 		t.Run(tt.mode, func(t *testing.T) {
-			if got := proxyNodeRoutes(proxies, tt.mode); !slices.Equal(got, tt.want) {
+			if got := renderedRoutes(proxyNodeRoutes(proxies, tt.mode)); !slices.Equal(got, tt.want) {
 				t.Fatalf("routes = %v, want %v", got, tt.want)
 			}
 		})
 	}
 
 	proxies["Auto"] = api.Proxy{Now: "Proxy", All: []string{"Proxy"}}
-	if got := proxyNodeRoute(proxies, "Proxy"); got != "Proxy → Auto → Proxy (cycle)" {
+	if got := proxyNodeRoute(proxies, "Proxy").String(); got != "Proxy → Auto → Proxy (cycle)" {
 		t.Fatalf("cyclic route = %q", got)
 	}
 	delete(proxies, "Auto")
-	if got := proxyNodeRoute(proxies, "Proxy"); got != "Proxy → Auto (unavailable)" {
+	if got := proxyNodeRoute(proxies, "Proxy").String(); got != "Proxy → Auto (unavailable)" {
 		t.Fatalf("missing member = %q", got)
 	}
 	proxies["Auto"] = api.Proxy{Type: "LoadBalance", Now: "HK", All: []string{"HK", "JP"}}
-	if got := proxyNodeRoute(proxies, "Proxy"); got != "Proxy → Auto (LoadBalance: per connection)" {
+	if got := proxyNodeRoute(proxies, "Proxy").String(); got != "Proxy → Auto (LoadBalance: per connection)" {
 		t.Fatalf("load balancer must not imply a single active node: %q", got)
 	}
 }
@@ -132,8 +132,8 @@ func TestDashboardRestartFailureAndBusyGuard(t *testing.T) {
 	s.MihomoBin = filepath.Join(t.TempDir(), "missing-core")
 	s.Controller = "127.0.0.1:0"
 	m, cmd := press(Model{settings: s}, keyRunes("R"))
-	if cmd == nil || !m.coreBusy || m.status != "restarting…" {
-		t.Fatalf("restart did not begin: status=%q busy=%v", m.status, m.coreBusy)
+	if cmd == nil || !m.coreBusy || m.status.String() != "restarting…" {
+		t.Fatalf("restart did not begin: status=%q busy=%v", m.status.String(), m.coreBusy)
 	}
 	for _, key := range []string{"R", "s", "x", "t"} {
 		if _, cmd := press(m, keyRunes(key)); cmd != nil {
@@ -141,8 +141,8 @@ func TestDashboardRestartFailureAndBusyGuard(t *testing.T) {
 		}
 	}
 	m, refresh := press(m, cmd())
-	if m.coreBusy || !m.statusErr || !strings.Contains(m.status, "not found") || refresh == nil {
-		t.Fatalf("restart failure not exposed or refreshed: status=%q busy=%v", m.status, m.coreBusy)
+	if m.coreBusy || !m.statusErr || !strings.Contains(m.status.String(), "not found") || refresh == nil {
+		t.Fatalf("restart failure not exposed or refreshed: status=%q busy=%v", m.status.String(), m.coreBusy)
 	}
 	if !strings.Contains(m.help(), "R restart") || !strings.Contains(m.help(), "r refresh") {
 		t.Fatalf("missing shortcut help: %s", m.help())
@@ -165,4 +165,12 @@ func TestXrayDashboardUsesRuntimeConfig(t *testing.T) {
 	if _, err := xrayNodeRoutes(path); err == nil {
 		t.Fatal("missing runtime route was hidden")
 	}
+}
+
+func renderedRoutes(routes []text) []string {
+	result := make([]string, len(routes))
+	for i, route := range routes {
+		result[i] = route.String()
+	}
+	return result
 }

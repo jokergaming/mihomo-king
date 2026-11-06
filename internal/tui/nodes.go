@@ -87,7 +87,7 @@ func (m Model) chooseChainNode() (tea.Model, tea.Cmd) {
 	}
 	if m.chainEntry == "" {
 		m.chainEntry = sel.id
-		m.setStatus("chain entry: " + sel.id + "; choose an exit node with c")
+		m.setStatus("chain entry: %s; choose an exit node with c", sel.id)
 		return m, nil
 	}
 	if m.chainEntry == sel.id {
@@ -111,12 +111,12 @@ func (m Model) updateTestURL(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			raw := strings.TrimSpace(m.testURLInput.Value())
 			if err := validateTestURL(raw); err != nil {
-				m.setErr(err.Error())
+				m.setError(err)
 				return m, nil
 			}
 			m.settings.TestURL = raw
 			if err := m.settings.Save(); err != nil {
-				m.setErr(err.Error())
+				m.setError(err)
 				return m, nil
 			}
 			m.editingTestURL = false
@@ -151,7 +151,7 @@ func (m Model) nodesEnter() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if g := m.findGroup(m.curGroup); g != nil && !isSelectorType(g.Type) {
-		m.setErr(fmt.Sprintf("%s picks nodes automatically (%s); only select-type groups are switchable", m.curGroup, g.Type))
+		m.setErr("%s picks nodes automatically (%s); only select-type groups are switchable", m.curGroup, g.Type)
 		return m, nil
 	}
 	m.setStatus("switching…")
@@ -166,7 +166,7 @@ func (m Model) testSelectedNode() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	m.setStatus("testing " + sel.id + "…")
+	m.setStatus("testing %s…", sel.id)
 	return m, testNodeCmd(m.settings, m.curGroup, sel.id)
 }
 
@@ -179,7 +179,7 @@ func (m Model) testCurrentGroup() (tea.Model, tea.Cmd) {
 		}
 		group = sel.id
 	}
-	m.setStatus("testing " + group + "…")
+	m.setStatus("testing %s…", group)
 	return m, testGroupCmd(m.settings, group)
 }
 
@@ -216,15 +216,15 @@ func (m *Model) showGroups() {
 	for _, g := range m.groups {
 		auto := ""
 		if !isSelectorType(g.Type) {
-			auto = "  ·  auto"
+			auto = m.tr("  ·  auto")
 		}
 		items = append(items, item{
 			title: g.Name,
-			desc:  fmt.Sprintf("%s%s  ·  now: %s  ·  %d nodes", g.Type, auto, g.Now, len(g.All)),
+			desc:  m.tr("%s%s  ·  now: %s  ·  %d nodes", g.Type, auto, g.Now, len(g.All)),
 			id:    g.Name,
 		})
 	}
-	m.nodes.Title = fmt.Sprintf("Proxy groups (%d)", len(m.groups))
+	m.nodes.Title = m.tr("Proxy groups (%d)", len(m.groups))
 	m.nodes.SetItems(items)
 	m.nodes.ResetSelected()
 }
@@ -255,7 +255,7 @@ func (m *Model) showMembers(group string) {
 	}
 	m.nodes.Title = group
 	if !isSelectorType(g.Type) {
-		m.nodes.Title = fmt.Sprintf("%s (%s — picks automatically)", group, g.Type)
+		m.nodes.Title = m.tr("%s (%s — picks automatically)", group, g.Type)
 	}
 	m.nodes.SetItems(items)
 	m.nodes.ResetSelected()
@@ -267,7 +267,7 @@ func isSelectorType(typ string) bool {
 
 func (m *Model) memberDescription(name string) string {
 	if group := m.findGroup(name); group != nil {
-		desc := fmt.Sprintf("%s group  ·  now: %s  ·  %d nodes", group.Type, group.Now, len(group.All))
+		desc := m.tr("%s group  ·  now: %s  ·  %d nodes", group.Type, group.Now, len(group.All))
 		if delay := m.delayDescription(name); delay != "" {
 			desc += "  ·  " + delay
 		}
@@ -277,18 +277,18 @@ func (m *Model) memberDescription(name string) string {
 }
 
 func (m Model) viewNodes() string {
-	view := m.nodes.View()
+	view := m.listView(m.nodes)
 	if chain := m.settings.ActiveChain(); chain != nil {
-		view = fmt.Sprintf("Chain: %s → %s  (%s)\n\n%s", chain.Entry, chain.Exit, config.ChainNodeName, view)
+		view = m.tr("Chain: %s → %s  (%s)\n\n%s", chain.Entry, chain.Exit, config.ChainNodeName, view)
 	} else if m.chainEntry != "" {
-		view = fmt.Sprintf("Chain entry: %s  ·  choose exit\n\n%s", m.chainEntry, view)
+		view = m.tr("Chain entry: %s  ·  choose exit\n\n%s", m.chainEntry, view)
 	}
 	if !m.editingTestURL {
 		return view
 	}
 	return fmt.Sprintf("%s\n\n%s\n%s",
 		view,
-		labelStyle.Render("test url"),
+		labelStyle.Render(m.tr("test url")),
 		m.testURLInput.View())
 }
 
@@ -313,21 +313,21 @@ func (m *Model) delayDescription(name string) string {
 		return ""
 	}
 	if delay <= 0 {
-		return "timeout"
+		return m.tr("timeout")
 	}
 	return fmt.Sprintf("%d ms", delay)
 }
 
 func validateTestURL(raw string) error {
 	if raw == "" {
-		return fmt.Errorf("test url required")
+		return message("test url required")
 	}
 	u, err := url.ParseRequestURI(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("invalid test url")
+		return message("invalid test url")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("test url must start with http:// or https://")
+		return message("test url must start with http:// or https://")
 	}
 	return nil
 }

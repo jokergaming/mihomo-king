@@ -447,22 +447,27 @@ func containsFile(files []File, name string) bool {
 
 // Note formats the result for the CLI and TUI.
 func Note(res *Result) string {
+	return FormatNote(res, fmt.Sprintf)
+}
+
+// FormatNote keeps result details shared by CLI and localized interfaces.
+func FormatNote(res *Result, format func(string, ...any) string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "geoip from %s", res.Source)
+	b.WriteString(format("geoip from %s", res.Source))
 	if res.SHA256 != "" {
-		fmt.Fprintf(&b, "\nsha256: %s", res.SHA256)
+		b.WriteString("\n" + format("sha256: %s", res.SHA256))
 	}
 	for _, file := range res.Files {
-		fmt.Fprintf(&b, "\n%s %s: %s (%d bytes)", file.Core, file.Format, file.Path, file.Bytes)
+		b.WriteString("\n" + format("%s %s: %s (%d bytes)", file.Core, file.Format, file.Path, file.Bytes))
 	}
 	if len(res.Files) == 0 {
-		b.WriteString("\nnothing changed")
+		b.WriteString("\n" + format("nothing changed"))
 	}
 	for _, tool := range res.Skipped {
-		fmt.Fprintf(&b, "\n%s unchanged", tool)
+		b.WriteString("\n" + format("%s unchanged", tool))
 	}
 	for _, tool := range res.Restarted {
-		fmt.Fprintf(&b, "\n%s restarted", tool)
+		b.WriteString("\n" + format("%s restarted", tool))
 	}
 	return b.String()
 }

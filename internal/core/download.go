@@ -516,18 +516,23 @@ func ValidChannel(channel string) bool { return slices.Contains(Channels(), chan
 
 // Note formats the post-install reminder, including the release page.
 func Note(tool string, res *Result) string {
-	note := fmt.Sprintf("installed %s %s at %s", tool, res.Release.Tag, res.Dest)
+	return FormatNote(tool, res, fmt.Sprintf)
+}
+
+// FormatNote formats the same install result for CLI and localized interfaces.
+func FormatNote(tool string, res *Result, format func(string, ...any) string) string {
+	note := format("installed %s %s at %s", tool, res.Release.Tag, res.Dest)
 	if res.Version != "" {
 		note += " (" + res.Version + ")"
 	}
 	if res.Restarted {
-		note += "\n" + tool + " restarted"
+		note += "\n" + format("%s restarted", tool)
 	}
 	if res.Stopped {
-		note += "\n" + tool + " left stopped"
+		note += "\n" + format("%s left stopped", tool)
 	}
 	if res.Caps {
-		note += "\ncaps: cap_net_admin,cap_net_raw=ep"
+		note += "\n" + format("caps: cap_net_admin,cap_net_raw=ep")
 	}
-	return note + "\nrelease: " + res.Release.URL + "\nopen the release page to see what changed"
+	return note + "\n" + format("release: %s", res.Release.URL) + "\n" + format("open the release page to see what changed")
 }

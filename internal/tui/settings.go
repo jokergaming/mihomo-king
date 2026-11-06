@@ -102,11 +102,11 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 		}
 		m.settings.NormalizeForTool()
 		if err := m.settings.Save(); err != nil {
-			m.setErr(err.Error())
+			m.setError(err)
 			return m, nil
 		}
 		m.reloadSettings()
-		m.setStatus("managing " + m.settings.ToolLabel())
+		m.setStatus("managing %s", m.settings.ToolLabel())
 		return m, refreshStatusCmd(m.settings)
 	}
 	m.editingSetting = true
@@ -129,7 +129,7 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.settingKey == settingCoreGet {
 				tool, channel, err := parseCoreDownload(m.settingInput.Value())
 				if err != nil {
-					m.setErr(err.Error())
+					m.setError(err)
 					return m, nil
 				}
 				m.editingSetting = false
@@ -139,7 +139,7 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.settingKey == settingGeoGet {
 				tools, err := parseGeoDownload(m.settingInput.Value())
 				if err != nil {
-					m.setErr(err.Error())
+					m.setError(err)
 					return m, nil
 				}
 				m.editingSetting = false
@@ -148,7 +148,7 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, geoDownloadCmd(m.settings, tools)
 			}
 			if err := m.saveSettingValue(m.settingKey, strings.TrimSpace(m.settingInput.Value())); err != nil {
-				m.setErr(err.Error())
+				m.setError(err)
 				return m, nil
 			}
 			m.editingSetting = false
@@ -198,7 +198,7 @@ func (m Model) settingValue(key string) string {
 
 func (m *Model) saveSettingValue(key, raw string) error {
 	if raw == "" {
-		return fmt.Errorf("%s required", key)
+		return message("%s required", message(m.settingLabel(key)))
 	}
 	switch key {
 	case settingMihomoBin:
@@ -210,13 +210,13 @@ func (m *Model) saveSettingValue(key, raw string) error {
 	case settingController:
 		hostPort := strings.TrimPrefix(strings.TrimPrefix(raw, "http://"), "https://")
 		if _, _, err := net.SplitHostPort(hostPort); err != nil {
-			return fmt.Errorf("invalid controller")
+			return message("invalid controller")
 		}
 		m.settings.Controller = raw
 	case settingMixedPort:
 		port, err := strconv.Atoi(raw)
 		if err != nil || port < 1 || port > 65535 {
-			return fmt.Errorf("mixed port must be 1-65535")
+			return message("mixed port must be 1-65535")
 		}
 		m.settings.MixedPort = port
 	case settingTunDevice:
@@ -230,48 +230,48 @@ func (m *Model) saveSettingValue(key, raw string) error {
 		m.settings.TestURL = raw
 	case settingMode:
 		if !validSettingOption(raw, m.settingOptions(key)) {
-			return fmt.Errorf("mode must be one of: %s", strings.Join(m.settingOptions(key), ", "))
+			return message("mode must be one of: %s", strings.Join(m.settingOptions(key), ", "))
 		}
 		m.settings.Mode = raw
 	case settingLogLevel:
 		if !validSettingOption(raw, m.settingOptions(key)) {
-			return fmt.Errorf("log level must be one of: %s", strings.Join(m.settingOptions(key), ", "))
+			return message("log level must be one of: %s", strings.Join(m.settingOptions(key), ", "))
 		}
 		m.settings.LogLevel = raw
 	default:
-		return fmt.Errorf("unknown setting %s", key)
+		return message("unknown setting %s", key)
 	}
 	return m.settings.Save()
 }
 
 func (m *Model) reloadSettings() {
 	rows := []list.Item{
-		item{title: "download core", desc: "release or alpha · replaces the configured binary · tab to choose", id: settingCoreGet},
-		item{title: "download geoip", desc: geoStatus(m.settings), id: settingGeoGet},
-		item{title: "managed tool", desc: m.settings.ToolLabel() + "  ·  options: mihomo, sing-box, xray  ·  enter to toggle", id: settingTool},
-		item{title: "autostart / 开机启动", desc: m.autostartDescription(), id: settingAutostart},
-		item{title: "mihomo binary", desc: binaryDesc(m.settings.MihomoBin), id: settingMihomoBin},
-		item{title: "sing-box binary", desc: binaryDesc(m.settings.SingBoxBin), id: settingSingBoxBin},
-		item{title: "xray binary", desc: binaryDesc(m.settings.XrayBin), id: settingXrayBin},
-		item{title: "controller", desc: m.settings.Controller, id: settingController},
-		item{title: "mixed port", desc: strconv.Itoa(m.settings.MixedPort), id: settingMixedPort},
-		item{title: "tun device", desc: m.settings.TunDevice, id: settingTunDevice},
-		item{title: "tun address", desc: m.settings.TunAddress, id: settingTunAddress},
-		item{title: "test url", desc: m.settings.TestURL, id: settingTestURL},
-		item{title: "mode", desc: optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
-		item{title: "log level", desc: optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
+		item{title: m.tr("download core"), desc: m.tr("release or alpha · replaces the configured binary · tab to choose"), id: settingCoreGet},
+		item{title: m.tr("download geoip"), desc: m.geoStatus(m.settings), id: settingGeoGet},
+		item{title: m.tr("managed tool"), desc: m.settings.ToolLabel() + m.tr("  ·  options: mihomo, sing-box, xray  ·  enter to toggle"), id: settingTool},
+		item{title: m.tr("autostart"), desc: m.autostartDescription(), id: settingAutostart},
+		item{title: m.tr("mihomo binary"), desc: m.binaryDesc(m.settings.MihomoBin), id: settingMihomoBin},
+		item{title: m.tr("sing-box binary"), desc: m.binaryDesc(m.settings.SingBoxBin), id: settingSingBoxBin},
+		item{title: m.tr("xray binary"), desc: m.binaryDesc(m.settings.XrayBin), id: settingXrayBin},
+		item{title: m.tr("controller"), desc: m.settings.Controller, id: settingController},
+		item{title: m.tr("mixed port"), desc: strconv.Itoa(m.settings.MixedPort), id: settingMixedPort},
+		item{title: m.tr("tun device"), desc: m.settings.TunDevice, id: settingTunDevice},
+		item{title: m.tr("tun address"), desc: m.settings.TunAddress, id: settingTunAddress},
+		item{title: m.tr("test url"), desc: m.settings.TestURL, id: settingTestURL},
+		item{title: m.tr("mode"), desc: m.optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
+		item{title: m.tr("log level"), desc: m.optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
 	}
-	m.settingsList.Title = "Settings"
+	m.settingsList.Title = m.tr("Settings")
 	m.settingsList.SetItems(rows)
 }
 
 func (m Model) viewSettings() string {
-	body := m.settingsList.View()
-	if m.coreNotice != "" {
-		body += "\n\n" + okStyle.Render(m.coreNotice)
+	body := m.listView(m.settingsList)
+	if m.coreNotice.key != "" {
+		body += "\n\n" + okStyle.Render(m.render(m.coreNotice))
 	}
 	if m.tunStage == tunAskCoreCaps {
-		return body + "\n\n  sudo password — set cap_net_admin,cap_net_raw=ep after download:\n  " + m.pwInput.View()
+		return body + m.tr("\n\n  sudo password — set cap_net_admin,cap_net_raw=ep after download:\n  ") + m.pwInput.View()
 	}
 	if !m.editingSetting {
 		return body
@@ -297,32 +297,32 @@ func (m Model) settingOptions(key string) []string {
 	}
 }
 
-func optionDesc(current string, options []string) string {
-	return fmt.Sprintf("%s  ·  options: %s", current, strings.Join(options, ", "))
+func (m Model) optionDesc(current string, options []string) string {
+	return m.tr("%s  ·  options: %s", current, strings.Join(options, ", "))
 }
 
 func (m Model) settingPrompt(key string) string {
 	switch key {
 	case settingCoreGet:
-		return "core channel (tab cycles mihomo/sing-box/xray and release/alpha)"
+		return m.tr("core channel (tab cycles mihomo/sing-box/xray and release/alpha)")
 	case settingGeoGet:
-		return "cores (tab cycles one core or all; one Loyalsoldier download is shared)"
+		return m.tr("cores (tab cycles one core or all; one Loyalsoldier download is shared)")
 	}
 	if options := m.settingOptions(key); len(options) > 0 {
-		return fmt.Sprintf("%s (tab: %s)", key, strings.Join(options, " / "))
+		return m.tr("%s (tab: %s)", m.settingLabel(key), strings.Join(options, " / "))
 	}
-	return key
+	return m.settingLabel(key)
 }
 
 func (m Model) beginCoreCaps(tool, channel string) (tea.Model, tea.Cmd) {
 	m.pendingCore = coreDownload{tool: tool, channel: channel}
 	if os.Geteuid() == 0 {
-		m.setStatus("downloading " + tool + " " + channel + "…")
+		m.setStatus("downloading %s %s…", tool, channel)
 		return m, coreDownloadCmd(m.settings, tool, channel, "")
 	}
 	m.tunStage = tunAskCoreCaps
 	m.pwInput.Reset()
-	m.pwInput.Placeholder = "sudo password"
+	m.pwInput.Placeholder = m.tr("sudo password")
 	return m, m.pwInput.Focus()
 }
 
@@ -347,7 +347,7 @@ func (m Model) updateCoreCapPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			tool, channel := m.pendingCore.tool, m.pendingCore.channel
 			m.pendingCore = coreDownload{}
-			m.setStatus("downloading " + tool + " " + channel + "…")
+			m.setStatus("downloading %s %s…", tool, channel)
 			return m, coreDownloadCmd(m.settings, tool, channel, pw)
 		}
 	}
@@ -384,12 +384,12 @@ func parseGeoDownload(raw string) ([]string, error) {
 		return nil, nil
 	}
 	if _, err := geo.FilesFor(raw); err != nil {
-		return nil, fmt.Errorf("choose one of: %s", strings.Join(geoDownloadOptions(), ", "))
+		return nil, message("choose one of: %s", strings.Join(geoDownloadOptions(), ", "))
 	}
 	return []string{raw}, nil
 }
 
-func geoStatus(s *config.Settings) string {
+func (m Model) geoStatus(s *config.Settings) string {
 	var present []string
 	if _, err := os.Stat(filepath.Join(s.MihomoDir, "GeoIP.dat")); err == nil {
 		present = append(present, "mihomo")
@@ -401,9 +401,9 @@ func geoStatus(s *config.Settings) string {
 		present = append(present, "xray")
 	}
 	if len(present) == 0 {
-		return "Loyalsoldier geoip · one download, shared by every core · not installed"
+		return m.tr("Loyalsoldier geoip · one download, shared by every core · not installed")
 	}
-	return "Loyalsoldier geoip · installed for " + strings.Join(present, ", ")
+	return m.tr("Loyalsoldier geoip · installed for ") + strings.Join(present, ", ")
 }
 
 func coreDownloadOptions() []string {
@@ -419,7 +419,7 @@ func coreDownloadOptions() []string {
 func parseCoreDownload(raw string) (string, string, error) {
 	tool, channel, ok := strings.Cut(strings.TrimSpace(raw), " ")
 	if !ok || !core.ValidChannel(channel) {
-		return "", "", fmt.Errorf("choose one of: %s", strings.Join(coreDownloadOptions(), ", "))
+		return "", "", message("choose one of: %s", strings.Join(coreDownloadOptions(), ", "))
 	}
 	if _, err := core.SpecFor(tool); err != nil {
 		return "", "", err
@@ -456,14 +456,17 @@ func validSettingOption(value string, options []string) bool {
 	return false
 }
 
-func binaryDesc(path string) string {
+func (m Model) binaryDesc(path string) string {
 	resolved := resolveBinary(path)
+	if resolved == "(not set)" {
+		resolved = m.tr("(not set)")
+	}
 	caps, ok := mihomo.NetCaps(resolved)
-	capText := "caps: unknown"
+	capText := m.tr("caps: unknown")
 	if ok && caps != "" {
-		capText = "caps: " + caps
+		capText = m.tr("caps: ") + caps
 	} else if ok {
-		capText = "caps: none"
+		capText = m.tr("caps: none")
 	}
 	return fmt.Sprintf("%s  ·  %s", resolved, capText)
 }
@@ -479,4 +482,13 @@ func resolveBinary(path string) string {
 		return resolved
 	}
 	return path
+}
+
+func (m Model) settingLabel(key string) string {
+	for _, row := range m.settingsList.Items() {
+		if entry := row.(item); entry.id == key {
+			return entry.title
+		}
+	}
+	return key
 }

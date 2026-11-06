@@ -2,7 +2,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -50,7 +49,7 @@ type Model struct {
 	screen    screen
 	width     int
 	height    int
-	status    string // transient status / error line
+	status    text // transient status / error line
 	statusErr bool
 
 	// dashboard (live state)
@@ -61,7 +60,7 @@ type Model struct {
 	liveTun    bool
 	capWarn    bool
 	foreignTun []string
-	liveNodes  []string
+	liveNodes  []text
 	nodeErr    error
 	coreBusy   bool
 
@@ -100,11 +99,12 @@ type Model struct {
 	editingSetting   bool
 	settingKey       string
 	settingInput     textinput.Model
-	coreNotice       string
+	coreNotice       text
 	pendingCore      coreDownload
 	autostartEnabled bool
 	autostartLoaded  bool
 	autostartBusy    bool
+	languageBusy     bool
 }
 
 type coreDownload struct {
@@ -148,8 +148,7 @@ func New(s *config.Settings) Model {
 	m.pwInput.EchoCharacter = '•'
 	m.pwInput.CharLimit = 128
 
-	m.reloadSubs()
-	m.reloadSettings()
+	m.refreshLanguage()
 	return m
 }
 
@@ -173,12 +172,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
+		case "ctrl+l":
+			return m.toggleLanguage()
 		case "ctrl+z":
 			return m, tea.Suspend
 		}
 
 	case tea.ResumeMsg: // back from ctrl+z: state may be stale
 		return m, refreshStatusCmd(m.settings)
+
+	case list.FilterMatchesMsg:
+		// A filter command can finish after a language change. Recompute from
+		// current rows so its old item text cannot restore the previous language.
+		var current *list.Model
+		switch m.screen {
+		case screenSubs:
+			current = &m.subs
+		case screenNodes:
+			current = &m.nodes
+		case screenSettings:
+			current = &m.settingsList
+		}
+		if current != nil && current.FilterState() != list.Unfiltered {
+			restoreListState(current, *current)
+		}
+		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -205,15 +223,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.coreBusy = false
 		return m.Update(msg.actionMsg)
 
+	case languageSavedMsg:
+		m.languageBusy = false
+		if msg.err != nil {
+			m.setErr("save language: %v", msg.err)
+			return m, nil
+		}
+		m.settings.Language = msg.language
+		m.refreshLanguage()
+		m.setStatus("language saved")
+		return m, nil
+
 	case autostartMsg:
 		m.autostartBusy = false
 		m.autostartLoaded = msg.err == nil
 		if msg.err != nil {
-			m.setErr("autostart: " + msg.err.Error())
+			m.setErr("autostart: %s", msg.err.Error())
 		} else {
 			m.autostartEnabled = msg.enabled
 			if msg.changed {
-				m.setStatus("autostart " + autostartState(msg.enabled))
+				m.setStatus("autostart %s", message(autostartState(msg.enabled)))
 			} else {
 				m.setStatus("settings refreshed")
 			}
@@ -223,11 +252,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case actionMsg:
 		if msg.err != nil {
-			m.coreNotice = ""
-			m.setErr(msg.err.Error())
+			m.coreNotice = text{}
+			m.setError(msg.err)
 		} else {
-			m.setStatus(msg.note)
-			if strings.HasPrefix(msg.note, "installed ") {
+			m.setTextStatus(msg.note)
+			if msg.notice {
 				m.coreNotice = msg.note
 			}
 		}
@@ -238,13 +267,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case subSwitchedMsg:
 		if msg.err != nil {
-			m.setErr(msg.err.Error())
+			m.setError(msg.err)
 		} else {
 			m.settings.Active = msg.name
 			if err := m.settings.Save(); err != nil {
-				m.setErr(err.Error())
+				m.setError(err)
 			} else {
-				m.setStatus("switched to " + msg.name)
+				m.setStatus("switched to %s", msg.name)
 			}
 		}
 		m.reloadSubs()
@@ -252,7 +281,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case subDownloadedMsg:
 		if msg.err != nil {
-			m.setErr(msg.err.Error())
+			m.setError(msg.err)
 			return m, nil
 		}
 		if previous, _ := m.settings.FindSub(msg.sub.Name); previous != nil && msg.sub.NoNodes {
@@ -260,9 +289,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.settings.UpsertSub(msg.sub)
 		if err := m.settings.Save(); err != nil {
-			m.setErr(err.Error())
+			m.setError(err)
 		} else {
-			m.setStatus(msg.note)
+			m.setTextStatus(msg.note)
 		}
 		m.reloadSubs()
 		return m, nil
@@ -270,14 +299,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case subEditedMsg:
 		m.reloadSubs()
 		if msg.err != nil {
-			m.setErr(msg.err.Error())
+			m.setError(msg.err)
 			return m, nil
 		}
 		if msg.sourceChanged {
 			m.updatePrompt = msg.name
 			m.setStatus("source saved; update now?")
 		} else {
-			m.setStatus("saved " + msg.name)
+			m.setStatus("saved %s", msg.name)
 		}
 		return m, nil
 
@@ -295,20 +324,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case 1:
 			m.setStatus("")
 		default:
-			m.setStatus(matchList(msg.matches))
+			m.setTextStatus(matchList(msg.matches))
 		}
 		return m, nil
 
 	case groupsMsg:
 		if msg.err != nil {
-			m.setErr("API: " + msg.err.Error())
+			m.setErr("API: %s", errorText(msg.err))
 			m.groups = nil
 			m.pendingGroup = ""
 			m.pendingNode = ""
 		} else {
 			m.groups = msg.groups
-			if msg.note != "" {
-				m.setStatus(msg.note)
+			if msg.note.key != "" {
+				m.setTextStatus(msg.note)
 			} else {
 				m.setStatus("loaded proxy groups")
 			}
@@ -318,10 +347,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case chainMsg:
 		if msg.err != nil {
-			m.setErr(msg.err.Error())
+			m.setError(msg.err)
 			return m, nil
 		}
-		m.setStatus(msg.note)
+		m.setTextStatus(msg.note)
 		if !msg.running {
 			return m, nil
 		}
@@ -330,14 +359,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case delayMsg:
 		if msg.err != nil {
-			m.setErr("delay: " + msg.err.Error())
+			m.setErr("delay: %s", msg.err.Error())
 			return m, nil
 		}
 		m.applyDelayMsg(msg)
 		if msg.node != "" {
-			m.setStatus(fmt.Sprintf("%s: %d ms", msg.node, msg.delays[msg.node]))
+			m.setStatus("%s: %d ms", msg.node, msg.delays[msg.node])
 		} else {
-			m.setStatus(fmt.Sprintf("tested %d nodes", len(msg.delays)))
+			m.setStatus("tested %d nodes", len(msg.delays))
 		}
 		return m, nil
 	}
@@ -420,7 +449,7 @@ func (m Model) View() string {
 }
 
 func (m Model) header() string {
-	tabs := []string{"1 Dashboard", "2 Subscriptions", "3 Nodes", "4 Settings"}
+	tabs := []string{m.tr("1 Dashboard"), m.tr("2 Subscriptions"), m.tr("3 Nodes"), m.tr("4 Settings")}
 	parts := make([]string, len(tabs))
 	for i, t := range tabs {
 		if int(m.screen) == i {
@@ -435,67 +464,71 @@ func (m Model) header() string {
 func (m Model) footer() string {
 	var status string
 	switch {
-	case m.status == "":
+	case m.status.key == "":
 	case m.statusErr:
-		status = errStyle.Render("✗ " + m.status)
+		status = errStyle.Render("✗ " + m.render(m.status))
 	default:
-		status = okStyle.Render("• " + m.status)
+		status = okStyle.Render("• " + m.render(m.status))
 	}
 	return status + "\n" + dimStyle.Render(m.help())
 }
 
 func (m Model) help() string {
+	return m.screenHelp() + " · " + m.tr("ctrl+l language")
+}
+
+func (m Model) screenHelp() string {
 	switch m.screen {
 	case screenSubs:
 		switch {
 		case m.updatePrompt != "":
-			return "y update now · n keep current · esc keep current"
+			return m.tr("y update now · n keep current · esc keep current")
 		case m.editingSub && m.editStage == 1 && !m.editLocal && m.editSourceIsFile():
-			return "tab complete path · enter save · esc cancel"
+			return m.tr("tab complete path · enter save · esc cancel")
 		case m.editingSub:
-			return "enter next/save · esc cancel"
+			return m.tr("enter next/save · esc cancel")
 		case m.addForm == addFile && m.addStage == 0:
-			return "tab complete path · enter next · esc cancel"
+			return m.tr("tab complete path · enter next · esc cancel")
 		case m.addForm != addNone:
-			return "enter confirm · esc cancel"
+			return m.tr("enter confirm · esc cancel")
 		}
 		if m.subs.FilterState() == list.Filtering {
-			return "type to filter · enter apply · esc cancel"
+			return m.tr("type to filter · enter apply · esc cancel")
 		}
-		return "a add sub · i import file · n add node · e edit · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit"
+		return m.tr("a add sub · i import file · n add node · e edit · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit")
 	case screenNodes:
 		if m.editingTestURL {
-			return "enter save url · esc cancel"
+			return m.tr("enter save url · esc cancel")
 		}
 		if m.nodes.FilterState() == list.Filtering {
-			return "type to filter · enter apply · esc cancel"
+			return m.tr("type to filter · enter apply · esc cancel")
 		}
 		if m.chainEntry != "" {
-			return "c choose exit · x cancel chain setup · esc back · / filter"
+			return m.tr("c choose exit · x cancel chain setup · esc back · / filter")
 		}
-		return "enter open/select · c set chain · x clear chain · l test · a test group · u set url · esc back · r reload · / filter · tab/1/2/3/4 switch · q quit"
+		return m.tr("enter open/select · c set chain · x clear chain · l test · a test group · u set url · esc back · r reload · / filter · tab/1/2/3/4 switch · q quit")
 	case screenSettings:
 		if m.tunStage == tunAskCoreCaps {
-			return "enter confirm · esc cancel"
+			return m.tr("enter confirm · esc cancel")
 		}
 		if m.editingSetting {
 			if len(m.settingOptions(m.settingKey)) > 0 {
-				return "tab complete · enter save · esc cancel"
+				return m.tr("tab complete · enter save · esc cancel")
 			}
-			return "enter save · esc cancel"
+			return m.tr("enter save · esc cancel")
 		}
 		if m.settingsList.FilterState() == list.Filtering {
-			return "type to filter · enter apply · esc cancel"
+			return m.tr("type to filter · enter apply · esc cancel")
 		}
-		return "enter edit/download · g download core · G download geoip · r refresh · / filter · tab/1/2/3/4 switch · q quit"
+		return m.tr("enter edit/download · g download core · G download geoip · r refresh · / filter · tab/1/2/3/4 switch · q quit")
 	default:
 		switch m.tunStage {
 		case tunAskForeign:
-			return "d shut down other tun (sudo) · c enable anyway · esc cancel"
+			return m.tr("d shut down other tun (sudo) · c enable anyway · esc cancel")
 		case tunAskPassword:
-			return "enter confirm · esc cancel"
+			return m.tr("enter confirm · esc cancel")
 		}
-		return "s start · x stop · R restart · t toggle tun · r refresh · tab/2/3/4 switch · q quit"
+		return m.tr("s start · x stop · R restart · t toggle tun · r refresh · tab/2/3/4 switch · q quit")
 	}
 }
 
@@ -537,36 +570,37 @@ func (m *Model) reloadSubs() {
 	for _, sub := range m.settings.Subscriptions {
 		source := sub.URL
 		if sub.Path != "" {
-			source = "file · " + sub.Path
+			source = m.tr("file · ") + sub.Path
 		}
 		desc := source
-		if info := subscription.FormatUserInfo(sub.UserInfo); info != "" {
+		if info := subscription.FormatUserInfoWith(sub.UserInfo, m.tr); info != "" {
 			desc = info + "  ·  " + source
 		}
 		if sub.NoNodes {
-			desc = "no usable nodes  ·  " + desc
+			desc = m.tr("no usable nodes  ·  ") + desc
 		}
 		if sub.NeedsUpdate {
-			desc = "! update needed  ·  " + desc
+			desc = m.tr("! update needed  ·  ") + desc
 		}
 		title := sub.Name
 		if sub.Name == m.settings.Active {
-			title = "● " + sub.Name + " (active)"
+			title = "● " + sub.Name + m.tr(" (active)")
 		}
 		items = append(items, item{title: title, desc: desc, id: sub.Name})
 	}
 	for _, node := range m.settings.LocalNodes {
 		items = append(items, item{
-			title: "Local / " + node.Name,
-			desc:  "local node · " + node.Link,
+			title: m.tr("Local / ") + node.Name,
+			desc:  m.tr("local node · ") + node.Link,
 			id:    "local:" + node.Name,
 		})
 	}
 	m.subs.SetItems(items)
 }
 
-func (m *Model) setStatus(s string) { m.status, m.statusErr = s, false }
-func (m *Model) setErr(s string)    { m.status, m.statusErr = s, true }
+func (m *Model) setStatus(key string, args ...any) { m.setTextStatus(message(key, args...)) }
+func (m *Model) setTextStatus(t text)              { m.status, m.statusErr = t, false }
+func (m *Model) setErr(key string, args ...any)    { m.status, m.statusErr = message(key, args...), true }
 
 var (
 	appStyle   = lipgloss.NewStyle().Padding(1, 2)

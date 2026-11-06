@@ -2,7 +2,6 @@ package tui
 
 import (
 	"cmp"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,7 +81,7 @@ func (m Model) openEditForm() (tea.Model, tea.Cmd) {
 		}
 		m.editLocal = true
 		name, source = node.Name, node.Link
-		m.urlInput.Placeholder = "node link"
+		m.urlInput.Placeholder = m.tr("node link")
 	} else {
 		sub, _ := m.settings.FindSub(sel.id)
 		if sub == nil {
@@ -94,7 +93,7 @@ func (m Model) openEditForm() (tea.Model, tea.Cmd) {
 		if sub.Path != "" {
 			source = sub.Path
 		}
-		m.urlInput.Placeholder = "HTTP(S) URL or file path"
+		m.urlInput.Placeholder = m.tr("HTTP(S) URL or file path")
 	}
 	m.nameInput.SetValue(name)
 	m.editSource = source
@@ -129,7 +128,7 @@ func (m Model) updateEditForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else {
 				if err := config.ValidateSubName(name); err != nil {
-					m.setErr(err.Error())
+					m.setError(err)
 					return m, nil
 				}
 			}
@@ -153,7 +152,7 @@ func (m Model) updateEditForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.editingSub = false
-			m.setStatus("saving " + name + "…")
+			m.setStatus("saving %s…", name)
 			if m.editLocal {
 				return m, editLocalNodeCmd(m.settings, oldName, name, source)
 			}
@@ -195,10 +194,10 @@ func (m Model) openAddForm(form addForm) (tea.Model, tea.Cmd) {
 	m.urlInput.Blur()
 	switch form {
 	case addSub:
-		m.nameInput.Placeholder = "name (e.g. provider-a)"
+		m.nameInput.Placeholder = m.tr("name (e.g. provider-a)")
 		m.urlInput.Placeholder = "https://example.com/sub.yaml"
 	case addFile:
-		m.nameInput.Placeholder = "defaults to the file name"
+		m.nameInput.Placeholder = m.tr("defaults to the file name")
 		m.urlInput.Placeholder = "~/Downloads/sub.yaml"
 	case addNode:
 		m.urlInput.Placeholder = "vless://, vmess://, ss://, trojan://, hy2://, socks5://, http://"
@@ -252,7 +251,7 @@ func (m Model) updateAddForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			name := strings.TrimSpace(m.nameInput.Value())
 			if err := config.ValidateSubName(name); err != nil {
-				m.setErr(err.Error())
+				m.setError(err)
 				return m, nil
 			}
 			rawURL := strings.TrimSpace(m.urlInput.Value())
@@ -262,10 +261,10 @@ func (m Model) updateAddForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.addForm = addNone
 			if subscription.IsLocalPath(rawURL) {
-				m.setStatus("importing " + name + "…")
+				m.setStatus("importing %s…", name)
 				return m, importFileCmd(name, rawURL, m.settings.SubPath(name))
 			}
-			m.setStatus("downloading " + name + "…")
+			m.setStatus("downloading %s…", name)
 			return m, downloadCmd(name, rawURL, m.settings.SubPath(name))
 		}
 	}
@@ -293,11 +292,11 @@ func (m Model) fileFormEnter() (tea.Model, tea.Cmd) {
 	}
 	name := strings.TrimSpace(m.nameInput.Value())
 	if err := config.ValidateSubName(name); err != nil {
-		m.setErr(err.Error())
+		m.setError(err)
 		return m, nil
 	}
 	m.addForm = addNone
-	m.setStatus("importing " + name + "…")
+	m.setStatus("importing %s…", name)
 	return m, importFileCmd(name, rawPath, m.settings.SubPath(name))
 }
 
@@ -308,7 +307,7 @@ func (m Model) updateSelectedSub() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if localName, ok := localNodeID(sel.id); ok {
-		m.setErr("local node " + localName + " has no remote update")
+		m.setErr("local node %s has no remote update", localName)
 		return m, nil
 	}
 	return m.updateSubByName(sel.id)
@@ -320,10 +319,10 @@ func (m Model) updateSubByName(name string) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if err := config.ValidateSubName(sub.Name); err != nil {
-		m.setErr(err.Error())
+		m.setError(err)
 		return m, nil
 	}
-	m.setStatus("updating " + sub.Name + "…")
+	m.setStatus("updating %s…", sub.Name)
 	if sub.Path != "" {
 		return m, importFileCmd(sub.Name, sub.Path, m.settings.SubPath(sub.Name))
 	}
@@ -340,22 +339,22 @@ func (m Model) deleteSelectedSub() (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if err := m.settings.Save(); err != nil {
-			m.setErr(err.Error())
+			m.setError(err)
 			return m, nil
 		}
 		m.reloadSubs()
-		m.setStatus("deleted local node " + localName)
-		return m, reloadRuntimeConfigCmd(m.settings, "local node deleted")
+		m.setStatus("deleted local node %s", localName)
+		return m, reloadRuntimeConfigCmd(m.settings, message("local node deleted"))
 	}
 	if err := os.Remove(m.settings.SubPath(sel.id)); err != nil && !os.IsNotExist(err) {
-		m.setErr(fmt.Sprintf("delete %s: %v", sel.id, err))
+		m.setErr("delete %s: %v", sel.id, err)
 		return m, nil
 	}
 	m.settings.RemoveSub(sel.id)
 	if err := m.settings.Save(); err != nil {
-		m.setErr(err.Error())
+		m.setError(err)
 	} else {
-		m.setStatus("deleted " + sel.id)
+		m.setStatus("deleted %s", sel.id)
 	}
 	m.reloadSubs()
 	return m, nil
@@ -370,48 +369,48 @@ func (m Model) activateSelectedSub() (tea.Model, tea.Cmd) {
 		m.screen = screenNodes
 		m.pendingGroup = config.LocalGroupName
 		m.pendingNode = localName
-		m.setStatus("opening local node " + localName + "…")
+		m.setStatus("opening local node %s…", localName)
 		return m, loadGroupsCmd(m.settings)
 	}
-	m.setStatus("activating " + sel.id + "…")
+	m.setStatus("activating %s…", sel.id)
 	return m, switchSubCmd(m.settings, sel.id)
 }
 
 func (m Model) viewSubs() string {
 	if m.updatePrompt != "" {
-		return titleStyle.Render("Update subscription now?") + "\n\n" +
+		return titleStyle.Render(m.tr("Update subscription now?")) + "\n\n" +
 			"  " + m.updatePrompt + "\n\n" +
-			dimStyle.Render("  Current content stays in use until an update succeeds.")
+			dimStyle.Render(m.tr("  Current content stays in use until an update succeeds."))
 	}
 	if m.editingSub {
-		title := "Edit subscription"
-		sourceLabel := "source: "
+		title := m.tr("Edit subscription")
+		sourceLabel := m.tr("source: ")
 		if m.editLocal {
-			title = "Edit local node"
-			sourceLabel = "link:   "
+			title = m.tr("Edit local node")
+			sourceLabel = m.tr("link:   ")
 		}
 		return titleStyle.Render(title) + "\n\n" +
-			"  name:   " + m.nameInput.View() + "\n" +
+			m.tr("  name:   ") + m.nameInput.View() + "\n" +
 			"  " + sourceLabel + m.urlInput.View()
 	}
 	switch m.addForm {
 	case addNode:
-		return titleStyle.Render("Add local node") + "\n\n" +
-			"  link: " + m.urlInput.View()
+		return titleStyle.Render(m.tr("Add local node")) + "\n\n" +
+			m.tr("  link: ") + m.urlInput.View()
 	case addSub:
-		return titleStyle.Render("Add subscription") + "\n\n" +
-			"  name: " + m.nameInput.View() + "\n" +
-			"  url:  " + m.urlInput.View()
+		return titleStyle.Render(m.tr("Add subscription")) + "\n\n" +
+			m.tr("  name: ") + m.nameInput.View() + "\n" +
+			m.tr("  url:  ") + m.urlInput.View()
 	case addFile:
-		return titleStyle.Render("Import subscription file") + "\n\n" +
-			"  file: " + m.urlInput.View() + "\n" +
-			"  name: " + m.nameInput.View() + "\n\n" +
-			dimStyle.Render("  Clash/mihomo YAML, a base64 node list, or node links one per line")
+		return titleStyle.Render(m.tr("Import subscription file")) + "\n\n" +
+			m.tr("  file: ") + m.urlInput.View() + "\n" +
+			m.tr("  name: ") + m.nameInput.View() + "\n\n" +
+			dimStyle.Render(m.tr("  Clash/mihomo YAML, a base64 node list, or node links one per line"))
 	}
 	if len(m.settings.Subscriptions) == 0 && len(m.settings.LocalNodes) == 0 {
-		return dimStyle.Render("No subscriptions yet — press 'a' to add one, 'i' to import a file or 'n' to add a local node.")
+		return dimStyle.Render(m.tr("No subscriptions yet — press 'a' to add one, 'i' to import a file or 'n' to add a local node."))
 	}
-	return m.subs.View()
+	return m.listView(m.subs)
 }
 
 func localNodeID(id string) (string, bool) {
@@ -476,10 +475,10 @@ func commonPrefix(values []string) string {
 }
 
 // matchList renders completion candidates for the status line.
-func matchList(matches []string) string {
+func matchList(matches []string) text {
 	const shown = 8
 	if len(matches) <= shown {
-		return strings.Join(matches, "  ")
+		return message("%s", strings.Join(matches, "  "))
 	}
-	return strings.Join(matches[:shown], "  ") + fmt.Sprintf("  … %d more", len(matches)-shown)
+	return message("%s  … %d more", strings.Join(matches[:shown], "  "), len(matches)-shown)
 }

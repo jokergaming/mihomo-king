@@ -50,7 +50,7 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// disabling needs no privileges and no checks
 			m.settings.TunEnable = false
 			if err := m.settings.Save(); err != nil {
-				m.setErr(err.Error())
+				m.setError(err)
 				return m, nil
 			}
 			return m, toggleTunCmd(m.settings)
@@ -138,82 +138,80 @@ func (m Model) updateTunPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) viewDashboard() string {
 	var b strings.Builder
 	row := func(label, val string) {
-		fmt.Fprintf(&b, "%s %s\n", labelStyle.Render(fmt.Sprintf("%-14s", label)), val)
+		fmt.Fprintf(&b, "%s %s\n", labelStyle.Width(14).Render(label), val)
 	}
 
-	state := errStyle.Render("stopped")
+	state := errStyle.Render(m.tr("stopped"))
 	if m.running {
-		state = okStyle.Render(fmt.Sprintf("running (pid %d)", m.pid))
+		state = okStyle.Render(m.tr("running (pid %d)", m.pid))
 	}
 	row(m.settings.ToolLabel(), state)
 	if m.version != "" {
-		row("version", m.version)
+		row(m.tr("version"), m.version)
 	}
 
 	mode := m.liveMode
 	if mode == "" {
 		mode = m.settings.Mode
 	}
-	row("mode", mode)
+	row(m.tr("mode"), m.tr(mode))
 
-	tun, tunStyle := "off", dimStyle
+	tun, tunStyle := m.tr("off"), dimStyle
 	if m.liveTun {
-		tun, tunStyle = "on", okStyle
+		tun, tunStyle = m.tr("on"), okStyle
 	}
-	row("tun", tunStyle.Render(tun))
+	row(m.tr("tun"), tunStyle.Render(tun))
 
 	active := m.settings.Active
 	if active == "" {
-		active = dimStyle.Render("(none — press 2, pick one, press enter to activate)")
+		active = dimStyle.Render(m.tr("(none — press 2, pick one, press enter to activate)"))
 	}
-	row("subscription", active)
+	row(m.tr("subscription"), active)
 	switch {
 	case !m.running:
-		row("nodes", dimStyle.Render("(not running)"))
+		row(m.tr("nodes"), dimStyle.Render(m.tr("(not running)")))
 	case m.nodeErr != nil:
-		row("nodes", errStyle.Render("unavailable: "+m.nodeErr.Error()))
+		row(m.tr("nodes"), errStyle.Render(m.tr("unavailable: %s", m.nodeErr.Error())))
 	case len(m.liveNodes) == 0:
-		row("nodes", dimStyle.Render("(no active proxy groups)"))
+		row(m.tr("nodes"), dimStyle.Render(m.tr("(no active proxy groups)")))
 	default:
 		for i, node := range m.liveNodes {
 			label := ""
 			if i == 0 {
-				label = "nodes"
+				label = m.tr("nodes")
 			}
-			row(label, node)
+			row(label, m.render(node))
 		}
 	}
-	row("controller", m.settings.Controller)
-	row("binary", m.settings.Binary())
-	row("config", m.settings.ConfigPath())
+	row(m.tr("controller"), m.settings.Controller)
+	row(m.tr("binary"), m.settings.Binary())
+	row(m.tr("config"), m.settings.ConfigPath())
 
 	switch m.tunStage {
 	case tunAskForeign:
-		b.WriteString("\n" + warnStyle.Render(fmt.Sprintf(
-			"⚠ Another TUN device is up: %s — two TUNs fight over routes/DNS.",
+		b.WriteString("\n" + warnStyle.Render(m.tr("⚠ Another TUN device is up: %s — two TUNs fight over routes/DNS.",
 			strings.Join(m.tunForeign, ", "))) + "\n" +
-			"  (d) shut it down with sudo and enable ours\n" +
-			"  (c) enable ours anyway\n" +
-			"  (esc) cancel")
+			m.tr("  (d) shut it down with sudo and enable ours\n") +
+			m.tr("  (c) enable ours anyway\n") +
+			m.tr("  (esc) cancel"))
 	case tunAskPassword:
-		what := "grant net caps to " + m.settings.ToolLabel() + " (setcap)"
+		what := m.tr("grant net caps to %s (setcap)", m.settings.ToolLabel())
 		if len(m.tunDelDevs) > 0 {
-			what = "shut down " + strings.Join(m.tunDelDevs, ", ")
+			what = m.tr("shut down %s", strings.Join(m.tunDelDevs, ", "))
 			if mihomo.MissingTunCaps(m.settings) {
-				what += " + setcap " + m.settings.ToolLabel()
+				what += m.tr(" + setcap ") + m.settings.ToolLabel()
 			}
 		}
-		b.WriteString("\n  sudo password — will " + what + ", then enable TUN:\n  " + m.pwInput.View())
+		b.WriteString(m.tr("\n  sudo password — will %s, then enable TUN:\n  ", what) + m.pwInput.View())
 	}
 
 	if m.tunStage == tunIdle {
 		if m.capWarn {
 			b.WriteString("\n" + warnStyle.Render(
-				"⚠ TUN is on but "+m.settings.ToolLabel()+" lacks net caps. Run:\n  sudo setcap cap_net_admin,cap_net_raw=ep "+m.settings.Binary()))
+				m.tr("⚠ TUN is on but %s lacks net caps. Run:\n  sudo setcap cap_net_admin,cap_net_raw=ep %s", m.settings.ToolLabel(), m.settings.Binary())))
 		}
 		if len(m.foreignTun) > 0 {
-			b.WriteString("\n" + warnStyle.Render(fmt.Sprintf(
-				"⚠ TUN is on but another TUN device is already up: %s\n  Two TUNs fight over routes/DNS — disable the other one (e.g. in its GUI) first.",
+			b.WriteString("\n" + warnStyle.Render(m.tr("⚠ TUN is on but another TUN device is already up: %s\n  Two TUNs fight over routes/DNS — disable the other one (e.g. in its GUI) first.",
 				strings.Join(m.foreignTun, ", "))))
 		}
 	}

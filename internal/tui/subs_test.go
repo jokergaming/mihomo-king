@@ -35,8 +35,8 @@ func TestImportFileFormPrefillsNameFromPath(t *testing.T) {
 	if cmd == nil || m.addForm != addNone {
 		t.Fatalf("submitting the name should close the form and start the import")
 	}
-	if m.status != "importing my-nodes…" {
-		t.Fatalf("status = %q", m.status)
+	if m.status.String() != "importing my-nodes…" {
+		t.Fatalf("status = %q", m.status.String())
 	}
 }
 
@@ -73,8 +73,8 @@ func TestAddSubscriptionFormAcceptsLocalPath(t *testing.T) {
 	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = press(m, paste("~/sub.yaml"))
 	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil || m.status != "importing home…" {
-		t.Fatalf("status = %q, want a local path to be imported, not downloaded", m.status)
+	if cmd == nil || m.status.String() != "importing home…" {
+		t.Fatalf("status = %q, want a local path to be imported, not downloaded", m.status.String())
 	}
 }
 
@@ -94,8 +94,8 @@ func TestImportFileCmdStoresConvertedSubscription(t *testing.T) {
 	if msg.sub.Name != "nodes" || msg.sub.Path != src || msg.sub.URL != "" {
 		t.Fatalf("sub = %#v, want the resolved file path recorded", msg.sub)
 	}
-	if want := "imported nodes · 2 proxies · skipped 1 link (ssr)"; msg.note != want {
-		t.Fatalf("note = %q, want %q", msg.note, want)
+	if want := "imported nodes · 2 proxies · skipped 1 link (ssr)"; msg.note.String() != want {
+		t.Fatalf("note = %q, want %q", msg.note.String(), want)
 	}
 	body, err := os.ReadFile(dest)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestDownloadCmdRecordsEmptySubscription(t *testing.T) {
 	if !ok || msg.err != nil {
 		t.Fatalf("downloadCmd = %#v", msg)
 	}
-	if !msg.sub.NoNodes || msg.sub.URL != srv.URL || !strings.Contains(msg.note, "no usable nodes") {
+	if !msg.sub.NoNodes || msg.sub.URL != srv.URL || !strings.Contains(msg.note.String(), "no usable nodes") {
 		t.Fatalf("empty subscription message = %#v", msg)
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {
@@ -198,8 +198,8 @@ func TestUnchangedLocalNodeEditDoesNotReload(t *testing.T) {
 	}
 	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil || m.editingSub || m.status != "unchanged" {
-		t.Fatalf("unchanged edit started a command: status=%q", m.status)
+	if cmd != nil || m.editingSub || m.status.String() != "unchanged" {
+		t.Fatalf("unchanged edit started a command: status=%q", m.status.String())
 	}
 }
 

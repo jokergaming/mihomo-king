@@ -12,12 +12,12 @@ import (
 
 // Rule mode can use different nodes for different destinations, so show each
 // group's selection rather than inventing a single system-wide active node.
-func proxyNodeRoutes(proxies map[string]api.Proxy, mode string) []string {
+func proxyNodeRoutes(proxies map[string]api.Proxy, mode string) []text {
 	if mode == "direct" {
-		return []string{"DIRECT"}
+		return []text{message("%s", "DIRECT")}
 	}
 	if mode == "global" {
-		return []string{proxyNodeRoute(proxies, "GLOBAL")}
+		return []text{proxyNodeRoute(proxies, "GLOBAL")}
 	}
 	var names []string
 	for name, p := range proxies {
@@ -26,41 +26,41 @@ func proxyNodeRoutes(proxies map[string]api.Proxy, mode string) []string {
 		}
 	}
 	slices.Sort(names)
-	routes := make([]string, 0, len(names))
+	routes := make([]text, 0, len(names))
 	for _, name := range names {
 		routes = append(routes, proxyNodeRoute(proxies, name))
 	}
 	return routes
 }
 
-func proxyNodeRoute(proxies map[string]api.Proxy, name string) string {
+func proxyNodeRoute(proxies map[string]api.Proxy, name string) text {
 	var path []string
 	seen := map[string]bool{}
 	for {
 		path = append(path, name)
 		if seen[name] {
-			return strings.Join(path, " → ") + " (cycle)"
+			return message("%s (cycle)", strings.Join(path, " → "))
 		}
 		seen[name] = true
 		p, ok := proxies[name]
 		if !ok {
-			return strings.Join(path, " → ") + " (unavailable)"
+			return message("%s (unavailable)", strings.Join(path, " → "))
 		}
 		if strings.EqualFold(p.Type, "LoadBalance") {
-			return strings.Join(path, " → ") + " (LoadBalance: per connection)"
+			return message("%s (LoadBalance: per connection)", strings.Join(path, " → "))
 		}
 		if p.Now != "" {
 			name = p.Now
 			continue
 		}
 		if len(p.All) > 0 {
-			return strings.Join(path, " → ") + " (no selection)"
+			return message("%s (no selection)", strings.Join(path, " → "))
 		}
 		result := strings.Join(path, " → ")
 		if p.Type != "" {
 			result += " (" + p.Type + ")"
 		}
-		return result
+		return message("%s", result)
 	}
 }
 

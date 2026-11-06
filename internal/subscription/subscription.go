@@ -381,9 +381,18 @@ func decodeBase64(text string) (string, bool) {
 // Summary describes the result for a status line, e.g.
 // "42 proxies · skipped 3 links (ssr)".
 func (r *Result) Summary() string {
+	return r.FormatSummary(fmt.Sprintf)
+}
+
+// FormatSummary shares subscription result presentation across interfaces.
+func (r *Result) FormatSummary(format func(string, ...any) string) string {
 	var parts []string
 	if r.Proxies > 0 {
-		parts = append(parts, plural(r.Proxies, "proxy", "proxies"))
+		key := "%d proxies"
+		if r.Proxies == 1 {
+			key = "%d proxy"
+		}
+		parts = append(parts, format(key, r.Proxies))
 	}
 	if len(r.Skipped) > 0 {
 		total := 0
@@ -391,30 +400,32 @@ func (r *Result) Summary() string {
 			total += n
 		}
 		schemes := strings.Join(slices.Sorted(maps.Keys(r.Skipped)), ", ")
-		parts = append(parts, fmt.Sprintf("skipped %s (%s)", plural(total, "link", "links"), schemes))
+		key := "skipped %d links (%s)"
+		if total == 1 {
+			key = "skipped %d link (%s)"
+		}
+		parts = append(parts, format(key, total, schemes))
 	}
 	if r.Fallback {
-		parts = append(parts, "used node list (Clash response had no proxies)")
+		parts = append(parts, format("used node list (Clash response had no proxies)"))
 	}
 	if r.Placeholders > 0 {
-		parts = append(parts, fmt.Sprintf("skipped %d placeholder nodes", r.Placeholders))
+		parts = append(parts, format("skipped %d placeholder nodes", r.Placeholders))
 	}
 	if r.NoNodes {
-		parts = append(parts, "no usable nodes (select nodes in provider sharing settings)")
+		parts = append(parts, format("no usable nodes (select nodes in provider sharing settings)"))
 	}
 	return strings.Join(parts, " · ")
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return fmt.Sprintf("%d %s", n, many)
 }
 
 // FormatUserInfo turns a raw subscription-userinfo header into a short human
 // string like "12.3GiB / 100.0GiB, expires 2026-07-01". Returns "" if empty.
 func FormatUserInfo(raw string) string {
+	return FormatUserInfoWith(raw, fmt.Sprintf)
+}
+
+// FormatUserInfoWith allows interfaces to translate quota and expiry labels.
+func FormatUserInfoWith(raw string, format func(string, ...any) string) string {
 	if raw == "" {
 		return ""
 	}
@@ -435,13 +446,13 @@ func FormatUserInfo(raw string) string {
 	case fields["total"] > 0:
 		fmt.Fprintf(&b, "%s / %s", humanBytes(used), humanBytes(fields["total"]))
 	case used > 0:
-		fmt.Fprintf(&b, "used %s", humanBytes(used))
+		b.WriteString(format("used %s", humanBytes(used)))
 	}
 	if exp := fields["expire"]; exp > 0 {
 		if b.Len() > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprintf(&b, "expires %s", time.Unix(exp, 0).Format("2006-01-02"))
+		b.WriteString(format("expires %s", time.Unix(exp, 0).Format("2006-01-02")))
 	}
 	return b.String()
 }

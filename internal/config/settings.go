@@ -46,6 +46,7 @@ type ProxyChain struct {
 
 // Settings is the persisted application configuration.
 type Settings struct {
+	Language      string         `yaml:"-"` // UI preference stored separately from proxy settings
 	ManagedTool   string         `yaml:"managed_tool"`
 	MihomoBin     string         `yaml:"mihomo_bin"`
 	MihomoDir     string         `yaml:"mihomo_dir"`
@@ -104,6 +105,10 @@ func Load() (*Settings, error) {
 
 	s.applyDefaults()
 	s.ensureSecret()
+	s.Language, err = s.LoadLanguage()
+	if err != nil {
+		return nil, err
+	}
 	if err := s.Save(); err != nil {
 		return nil, err
 	}

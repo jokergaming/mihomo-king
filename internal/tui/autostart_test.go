@@ -45,7 +45,7 @@ func TestSettingsAutostartToggleAndPersistence(t *testing.T) {
 	}
 	m, _ = press(m, cmd())
 	if !m.autostartEnabled || m.statusErr || m.autostartBusy {
-		t.Fatalf("enable failed: %s", m.status)
+		t.Fatalf("enable failed: %s", m.status.String())
 	}
 
 	// A fresh model must discover the persisted desktop entry, not a YAML flag.
@@ -59,7 +59,7 @@ func TestSettingsAutostartToggleAndPersistence(t *testing.T) {
 	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = press(m, cmd())
 	if m.autostartEnabled || m.statusErr {
-		t.Fatalf("disable failed: %s", m.status)
+		t.Fatalf("disable failed: %s", m.status.String())
 	}
 	if enabled, err := autostart.Enabled(); err != nil || enabled {
 		t.Fatalf("disable not persisted: %v, %v", enabled, err)
@@ -78,7 +78,7 @@ func TestSettingsAutostartFailureAndRetry(t *testing.T) {
 	m, cmd := m.switchScreen(screenSettings)
 	m, _ = press(m, cmd())
 	if !m.statusErr || m.autostartLoaded || m.autostartBusy || !strings.Contains(m.autostartDescription(), "unavailable") {
-		t.Fatalf("read error hidden: %s", m.status)
+		t.Fatalf("read error hidden: %s", m.status.String())
 	}
 	if err := os.Remove(blocker); err != nil {
 		t.Fatal(err)
@@ -98,8 +98,8 @@ func TestSettingsAutostartFailureAndRetry(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = press(m, cmd())
-	if !m.statusErr || m.autostartEnabled || m.autostartBusy || !strings.Contains(m.status, "requires env") {
-		t.Fatalf("failed toggle reported success: %s", m.status)
+	if !m.statusErr || m.autostartEnabled || m.autostartBusy || !strings.Contains(m.status.String(), "requires env") {
+		t.Fatalf("failed toggle reported success: %s", m.status.String())
 	}
 	if enabled, err := autostart.Enabled(); err != nil || enabled {
 		t.Fatalf("failed toggle created a startup entry: %v, %v", enabled, err)

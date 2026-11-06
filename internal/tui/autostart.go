@@ -41,10 +41,10 @@ func autostartState(enabled bool) string {
 
 func (m Model) autostartDescription() string {
 	if m.autostartBusy {
-		return "updating…"
+		return m.tr("updating…")
 	}
 	if !m.autostartLoaded {
-		return "unavailable · r to retry"
+		return m.tr("unavailable · r to retry")
 	}
-	return autostartState(m.autostartEnabled) + " · start proxy in background at desktop login · enter to toggle"
+	return m.tr("%s · start proxy in background at desktop login · enter to toggle", message(autostartState(m.autostartEnabled)))
 }

@@ -28,25 +28,25 @@ type statusMsg struct {
 	tun        bool
 	capWarn    bool
 	foreignTun []string // other live TUN devices (e.g. another clash's "Meta")
-	nodes      []string
+	nodes      []text
 	nodeErr    error
 }
 
 type groupsMsg struct {
 	groups []api.Group
-	note   string
+	note   text
 	err    error
 }
 
 type chainMsg struct {
-	note    string
+	note    text
 	running bool
 	err     error
 }
 
 type subDownloadedMsg struct {
 	sub  config.Subscription
-	note string
+	note text
 	err  error
 }
 
@@ -63,8 +63,9 @@ type pathCompletionMsg struct {
 }
 
 type actionMsg struct {
-	note string
-	err  error
+	note   text
+	err    error
+	notice bool
 }
 
 type coreActionMsg struct{ actionMsg }
@@ -98,7 +99,11 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 			if s.Tool() == config.ToolXray {
 				msg.version = mihomo.CoreVersion(s)
 				msg.tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
-				msg.nodes, msg.nodeErr = xrayNodeRoutes(s.ConfigPath())
+				routes, err := xrayNodeRoutes(s.ConfigPath())
+				msg.nodeErr = err
+				for _, route := range routes {
+					msg.nodes = append(msg.nodes, message("%s", route))
+				}
 			} else {
 				c := api.New(controller, secret)
 				if v, err := c.Version(); err == nil {
@@ -110,7 +115,7 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 						msg.tun = cfg.Tun.Enable
 					}
 					if cfg.Mode == "direct" {
-						msg.nodes = []string{"DIRECT"}
+						msg.nodes = []text{message("%s", "DIRECT")}
 					} else {
 						proxies, err := c.Proxies()
 						msg.nodeErr = err
@@ -139,7 +144,7 @@ func startCmd(s *config.Settings) tea.Cmd {
 		if err := mihomo.Start(s); err != nil {
 			return coreActionMsg{actionMsg{err: err}}
 		}
-		return coreActionMsg{actionMsg{note: s.ToolLabel() + " started"}}
+		return coreActionMsg{actionMsg{note: message("%s started", s.ToolLabel())}}
 	}
 }
 
@@ -148,7 +153,7 @@ func stopCmd(s *config.Settings) tea.Cmd {
 		if err := mihomo.Stop(s); err != nil {
 			return coreActionMsg{actionMsg{err: err}}
 		}
-		return coreActionMsg{actionMsg{note: s.ToolLabel() + " stopped"}}
+		return coreActionMsg{actionMsg{note: message("%s stopped", s.ToolLabel())}}
 	}
 }
 
@@ -157,7 +162,7 @@ func restartCmd(s *config.Settings) tea.Cmd {
 		if err := mihomo.Restart(s); err != nil {
 			return coreActionMsg{actionMsg{err: err}}
 		}
-		return coreActionMsg{actionMsg{note: s.ToolLabel() + " restarted"}}
+		return coreActionMsg{actionMsg{note: message("%s restarted", s.ToolLabel())}}
 	}
 }
 
@@ -169,9 +174,9 @@ func toggleTunCmd(s *config.Settings) tea.Cmd {
 			return actionMsg{err: err}
 		}
 		if want {
-			return actionMsg{note: "TUN on"}
+			return actionMsg{note: message("TUN on")}
 		}
-		return actionMsg{note: "TUN off"}
+		return actionMsg{note: message("TUN off")}
 	}
 }
 
@@ -182,13 +187,13 @@ func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd
 	return func() tea.Msg {
 		for _, dev := range delDevs {
 			if err := mihomo.DeleteTunDevice(password, dev); err != nil {
-				return actionMsg{err: fmt.Errorf("shut down %s: %v", dev, err)}
+				return actionMsg{err: message("shut down %s: %v", dev, err)}
 			}
 		}
 		needRestart := false
 		if mihomo.MissingTunCaps(s) {
 			if password == "" {
-				return actionMsg{err: fmt.Errorf("%s lacks net caps; press t again to enter the sudo password", s.ToolLabel())}
+				return actionMsg{err: message("%s lacks net caps; press t again to enter the sudo password", s.ToolLabel())}
 			}
 			if err := mihomo.GrantNetCaps(password, s.Binary()); err != nil {
 				return actionMsg{err: err}
@@ -201,12 +206,12 @@ func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd
 		}
 		if running, _ := mihomo.Running(s); running && needRestart {
 			if err := mihomo.Restart(s); err != nil {
-				return actionMsg{err: fmt.Errorf("restart after setcap: %v", err)}
+				return actionMsg{err: message("restart after setcap: %v", err)}
 			}
 		} else if err := mihomo.ApplyTun(s); err != nil {
 			return actionMsg{err: err}
 		}
-		return actionMsg{note: "TUN on"}
+		return actionMsg{note: message("TUN on")}
 	}
 }
 
@@ -229,9 +234,9 @@ func coreDownloadCmd(s *config.Settings, tool, channel, password string) tea.Cmd
 			if res == nil {
 				return actionMsg{err: err}
 			}
-			return actionMsg{note: core.Note(tool, res), err: err}
+			return actionMsg{note: coreNote(tool, res), err: err}
 		}
-		return actionMsg{note: core.Note(tool, res)}
+		return actionMsg{note: coreNote(tool, res), notice: true}
 	}
 }
 
@@ -252,9 +257,9 @@ func geoDownloadCmd(s *config.Settings, tools []string) tea.Cmd {
 			if res == nil {
 				return actionMsg{err: err}
 			}
-			return actionMsg{note: geo.Note(res), err: err}
+			return actionMsg{note: geoNote(res), err: err}
 		}
-		return actionMsg{note: geo.Note(res)}
+		return actionMsg{note: geoNote(res)}
 	}
 }
 
@@ -275,7 +280,7 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 				UserInfo:  res.UserInfo,
 				NoNodes:   res.NoNodes,
 			},
-			note: fetchedNote("downloaded "+name, res),
+			note: fetchedNote(message("downloaded %s", name), res),
 		}
 	}
 }
@@ -301,7 +306,7 @@ func importFileCmd(name, rawPath, dest string) tea.Cmd {
 				Path:      path,
 				UpdatedAt: time.Now().Format("2006-01-02 15:04"),
 			},
-			note: fetchedNote("imported "+name, res),
+			note: fetchedNote(message("imported %s", name), res),
 		}
 	}
 }
@@ -319,7 +324,7 @@ func editSubCmd(s *config.Settings, oldName, name, rawSource string) tea.Cmd {
 		} else {
 			u, err := url.Parse(source)
 			if err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" {
-				return subEditedMsg{err: fmt.Errorf("source must be an HTTP(S) URL or file path")}
+				return subEditedMsg{err: message("source must be an HTTP(S) URL or file path")}
 			}
 		}
 		changed, err := s.EditSub(oldName, name, source, isFile)
@@ -337,13 +342,6 @@ func editLocalNodeCmd(s *config.Settings, oldName, name, link string) tea.Cmd {
 		}
 		return subEditedMsg{name: name}
 	}
-}
-
-func fetchedNote(done string, res *subscription.Result) string {
-	if summary := res.Summary(); summary != "" {
-		return done + " · " + summary
-	}
-	return done
 }
 
 func completePathCmd(input string) tea.Cmd {
@@ -365,11 +363,11 @@ func addLocalNodeCmd(s *config.Settings, rawLink string) tea.Cmd {
 		if err := reloadRuntimeConfig(s); err != nil {
 			return actionMsg{err: err}
 		}
-		return actionMsg{note: "added local node " + node.Name}
+		return actionMsg{note: message("added local node %s", node.Name)}
 	}
 }
 
-func reloadRuntimeConfigCmd(s *config.Settings, note string) tea.Cmd {
+func reloadRuntimeConfigCmd(s *config.Settings, note text) tea.Cmd {
 	return func() tea.Msg {
 		if err := reloadRuntimeConfig(s); err != nil {
 			return actionMsg{err: err}
@@ -382,11 +380,11 @@ func reloadRuntimeConfig(s *config.Settings) error {
 	return mihomo.Reload(s)
 }
 
-func loadGroupsCmd(s *config.Settings, note ...string) tea.Cmd {
+func loadGroupsCmd(s *config.Settings, note ...text) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return groupsMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
+			return groupsMsg{err: message("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		if s.Tool() == config.ToolXray {
 			groups, err := s.XrayGroups()
@@ -398,7 +396,7 @@ func loadGroupsCmd(s *config.Settings, note ...string) tea.Cmd {
 		}
 		groups, err := api.New(controller, secret).Groups()
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
+			err = message("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
 		msg := groupsMsg{groups: groups, err: err}
 		if len(note) > 0 {
@@ -415,9 +413,9 @@ func setChainCmd(s *config.Settings, chain *config.ProxyChain) tea.Cmd {
 		}
 		running, _ := mihomo.Running(s)
 		if chain == nil {
-			return chainMsg{note: "chain cleared", running: running}
+			return chainMsg{note: message("chain cleared"), running: running}
 		}
-		return chainMsg{note: "chain: " + chain.Entry + " → " + chain.Exit + "; select " + config.ChainNodeName + " in a group", running: running}
+		return chainMsg{note: message("chain: %s → %s; select %s in a group", chain.Entry, chain.Exit, config.ChainNodeName), running: running}
 	}
 }
 
@@ -425,7 +423,7 @@ func selectNodeAndLoadGroupsCmd(s *config.Settings, group, node string) tea.Cmd 
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return groupsMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
+			return groupsMsg{err: message("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		if s.Tool() == config.ToolXray {
 			s.XrayNode = node
@@ -436,20 +434,20 @@ func selectNodeAndLoadGroupsCmd(s *config.Settings, group, node string) tea.Cmd 
 				return groupsMsg{err: err}
 			}
 			groups, err := s.XrayGroups()
-			return groupsMsg{groups: groups, note: group + " → " + node, err: err}
+			return groupsMsg{groups: groups, note: message("%s → %s", group, node), err: err}
 		}
 		c := api.New(controller, secret)
 		if err := c.SelectNode(group, node); err != nil {
 			if errors.Is(err, api.ErrUnauthorized) {
-				err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
+				err = message("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 			}
 			return groupsMsg{err: err}
 		}
 		groups, err := c.Groups()
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
+			err = message("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
-		return groupsMsg{groups: groups, note: group + " → " + node, err: err}
+		return groupsMsg{groups: groups, note: message("%s → %s", group, node), err: err}
 	}
 }
 
@@ -457,7 +455,7 @@ func testNodeCmd(s *config.Settings, group, node string) tea.Cmd {
 	controller, secret, testURL := s.Controller, s.Secret, s.TestURL
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return delayMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
+			return delayMsg{err: message("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		if s.Tool() == config.ToolXray {
 			delay, err := s.XrayDelay(node, testURL, 5*time.Second)
@@ -468,7 +466,7 @@ func testNodeCmd(s *config.Settings, group, node string) tea.Cmd {
 		}
 		delay, err := api.New(controller, secret).Delay(node, testURL, 5000)
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
+			err = message("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
 		if err != nil {
 			return delayMsg{err: err}
@@ -481,7 +479,7 @@ func testGroupCmd(s *config.Settings, group string) tea.Cmd {
 	controller, secret, testURL := s.Controller, s.Secret, s.TestURL
 	return func() tea.Msg {
 		if running, _ := mihomo.Running(s); !running {
-			return delayMsg{err: fmt.Errorf("%s is not running; start it from dashboard first", s.ToolLabel())}
+			return delayMsg{err: message("%s is not running; start it from dashboard first", s.ToolLabel())}
 		}
 		if s.Tool() == config.ToolXray {
 			delays, err := s.XrayGroupDelay(group, testURL, 5*time.Second)
@@ -496,7 +494,7 @@ func testGroupCmd(s *config.Settings, group string) tea.Cmd {
 			delays, err = testGroupMembers(c, group, testURL)
 		}
 		if errors.Is(err, api.ErrUnauthorized) {
-			err = fmt.Errorf("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
+			err = message("controller rejected the saved secret; restart %s from dashboard or check %s", s.ToolLabel(), s.ConfigPath())
 		}
 		if err != nil {
 			return delayMsg{err: err}
@@ -518,7 +516,7 @@ func testGroupMembers(c *api.Client, group, testURL string) (map[string]int, err
 		}
 	}
 	if len(members) == 0 {
-		return nil, fmt.Errorf("group %s has no testable members", group)
+		return nil, message("group %s has no testable members", group)
 	}
 	delays := map[string]int{}
 	for _, node := range members {
