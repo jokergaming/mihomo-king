@@ -1,7 +1,10 @@
 # mihomo-king
 
+**English** | [简体中文](README.zh-CN.md)
+
 A small Linux TUI for managing [mihomo](https://github.com/MetaCubeX/mihomo)
-(Clash.Meta) or [sing-box](https://github.com/SagerNet/sing-box) proxy cores,
+(Clash.Meta), [sing-box](https://github.com/SagerNet/sing-box), or
+[Xray](https://github.com/XTLS/Xray-core) proxy cores,
 built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
 ## Features
@@ -10,25 +13,37 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
   base64 node lists, or node links one per line.
 - Add local nodes from share links (vmess, vless, ss, trojan, hysteria2, socks5, http).
 - Switch the active subscription and reload the managed core.
-- Manage either mihomo or sing-box from the settings screen.
-- Convert Clash/mihomo subscriptions into sing-box runtime config.
+- Choose mihomo, sing-box, or Xray from the settings screen.
+- Convert Clash/mihomo subscriptions into sing-box or Xray runtime config.
 - Toggle TUN mode.
 - Switch the selected node within a proxy group.
 - Create an entry-to-exit proxy chain and select it in a manual proxy group.
 - Test node and group latency with a configurable test URL.
 
-主界面显示当前运行时的节点选择和协议类型，嵌套策略组会展开到最终节点；
-规则模式分别列出各策略组，全局模式显示 `GLOBAL` 的选择，直连模式显示 `DIRECT`。
-按 `R` 重启当前管理的核心（停止时会启动），按 `r` 刷新状态；状态也会每 3 秒自动刷新。
+The dashboard shows runtime node selections and protocols, following nested
+groups to their final nodes. Rule mode lists each group's selection, global mode
+shows `GLOBAL`, and direct mode shows `DIRECT`. Press `R` to restart the managed
+core (or start it if stopped), and `r` to refresh. Status refreshes every 3 seconds.
 
-界面默认使用英文，任意页面按 `Ctrl+L` 切换中文或英文，语言选择会保存到应用目录下的 `language` 文件。
-菜单、帮助、表单和弹窗会一起切换；输入框、密码框和筛选过程中也可使用该快捷键，保留当前输入及选择。
+### Interface language
 
-设置页（`4`）提供 `autostart`（中文界面显示「开机启动」），默认关闭，选中后按 `Enter` 切换。
-开启后在下次登录 Linux 桌面时，按保存的订阅、核心和 TUN 设置后台启动代理，不弹出 TUI。
-开关保存在 `${XDG_CONFIG_HOME:-~/.config}/autostart/mihomo-king.desktop`，重新打开程序仍会保留；
-关闭只取消自动启动，不停止正在运行的代理。请从固定位置的可执行文件开启，勿使用 `go run`；
-移动程序后需重新关闭、开启，以更新路径。需要 TUN 时，请提前授予核心相应权限。
+The interface defaults to English. Press `Ctrl+L` on any screen to switch between
+English and Simplified Chinese. Menus, help, forms, and dialogs switch together;
+current input, filters, and selections are preserved, including in password
+prompts. The choice is saved in the app directory's `language` file.
+
+### Desktop autostart
+
+Open Settings (`4`), select `autostart`, and press `Enter` to toggle it. Autostart
+is **off by default**. When enabled, the next Linux desktop login starts the proxy
+in the background using the saved core, subscription, and TUN settings, without
+opening the TUI. Disabling it leaves the current proxy running.
+
+The switch is stored at
+`${XDG_CONFIG_HOME:-~/.config}/autostart/mihomo-king.desktop`. Enable it from a
+binary at a permanent location, rather than `go run`. If you move the binary,
+toggle autostart off and on to update its path. Grant the core's TUN capabilities
+in advance if TUN is enabled.
 
 ## Build & run
 
@@ -148,3 +163,13 @@ sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v sing-box)"
 If another TUN device is already up (e.g. a coexisting clash GUI), enabling TUN asks
 whether to shut the other device down (via sudo `ip link delete`), enable ours anyway
 (two TUNs fight over routes/DNS — not recommended), or cancel.
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=jokergaming%2Fmihomo-king&amp;type=date&amp;legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jokergaming/mihomo-king&amp;type=Date&amp;theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jokergaming/mihomo-king&amp;type=Date" />
+    <img alt="Star History chart for mihomo-king" src="https://api.star-history.com/svg?repos=jokergaming/mihomo-king&amp;type=Date" width="600" />
+  </picture>
+</a>
