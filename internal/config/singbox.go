@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -170,7 +171,7 @@ func singBoxInbounds(s *Settings) []map[string]any {
 			"address":        []string{s.TunAddress},
 			"stack":          "system",
 			"auto_route":     true,
-			"auto_redirect":  true,
+			"auto_redirect":  runtime.GOOS == "linux",
 			"strict_route":   true,
 			"mtu":            9000,
 		})

@@ -13,8 +13,22 @@ import (
 
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/core"
+	"mihomo-king/internal/mihomo"
 	"mihomo-king/internal/subscription"
 )
+
+func TestTunErrorLocalizationPreservesExternalErrors(t *testing.T) {
+	for _, err := range []error{mihomo.ErrDarwinTunPrivileges, config.ErrInvalidTunDevice} {
+		if got := errorText(err).render(config.LanguageChinese); !strings.Contains(got, "macOS TUN") || got == err.Error() {
+			t.Fatalf("TUN error was not translated: %s", got)
+		}
+	}
+	for _, detail := range []string{"TUN on", "upstream error: 50% failed", "no route to host"} {
+		if got := errorText(errors.New(detail)).render(config.LanguageChinese); got != detail {
+			t.Fatalf("external error changed: %q, want %q", got, detail)
+		}
+	}
+}
 
 func switchLanguage(t *testing.T, m Model) Model {
 	t.Helper()

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -54,6 +55,11 @@ func Running(s *config.Settings) (bool, int) {
 // Start writes the active config from the stored subscription and launches the
 // selected tool detached. It is a no-op if it is already running.
 func Start(s *config.Settings) error {
+	if s.TunEnable {
+		if err := CheckTunPrivileges(s); err != nil {
+			return err
+		}
+	}
 	if ok, _ := Running(s); ok {
 		return nil
 	}
@@ -112,6 +118,9 @@ func Start(s *config.Settings) error {
 			_ = os.Remove(s.PidFile())
 			return fmt.Errorf("%s controller was not ready: %w; see %s", s.ToolLabel(), err, s.LogFile())
 		}
+	}
+	if err := verifyTun(s); err != nil {
+		return errors.Join(err, Stop(s))
 	}
 	return nil
 }
@@ -241,7 +250,7 @@ func Stop(s *config.Settings) error {
 // MissingTunCaps reports whether TUN is likely to fail because the binary lacks
 // the needed capabilities and we are not root. Best-effort: false when unsure.
 func MissingTunCaps(s *config.Settings) bool {
-	if os.Geteuid() == 0 {
+	if runtime.GOOS != "linux" || os.Geteuid() == 0 {
 		return false
 	}
 	caps, ok := NetCaps(s.Binary())
@@ -386,8 +395,18 @@ func alive(pid int) bool {
 }
 
 func matchesBinary(pid int, bin string) bool {
-	exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	var exe string
+	var err error
+	if runtime.GOOS == "darwin" {
+		out, psErr := exec.Command("ps", "-ww", "-p", strconv.Itoa(pid), "-o", "comm=").Output()
+		exe, err = strings.TrimSpace(string(out)), psErr
+	} else {
+		exe, err = os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	}
 	if err != nil {
+		if runtime.GOOS == "darwin" {
+			return false
+		}
 		return true // best effort outside Linux/procfs permission edge cases
 	}
 	want := bin

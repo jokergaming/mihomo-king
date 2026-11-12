@@ -138,8 +138,8 @@ The release uploads `tar.gz` archives and SHA-256 checksum files for:
 - `linux-amd64-musl`
 - `linux-arm64-glibc` (default)
 - `linux-arm64-musl`
-- `darwin-amd64`
-- `darwin-arm64`
+- `darwin-amd64` (Intel Mac)
+- `darwin-arm64` (Apple silicon Mac, M series)
 
 The tool manages the selected core as a background subprocess (start/stop from
 the dashboard) and talks to its Clash-compatible API for live changes. It writes
@@ -149,7 +149,7 @@ to `~/.config/sing-box/config.json`.
 
 ## TUN requires privileges
 
-Creating a TUN device needs `CAP_NET_ADMIN`/`CAP_NET_RAW`. When you enable TUN in
+On Linux, creating a TUN device needs `CAP_NET_ADMIN`/`CAP_NET_RAW`. When you enable TUN in
 the dashboard, the tool handles privileges itself: if the selected core binary
 lacks the caps it asks for your sudo password (masked, in-TUI) and runs `setcap`
 for you, restarting the managed core so the caps take effect. To grant them
@@ -160,9 +160,25 @@ sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v mihomo)"
 sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v sing-box)"
 ```
 
-If another TUN device is already up (e.g. a coexisting clash GUI), enabling TUN asks
+On Linux, if another TUN device is already up (e.g. a coexisting clash GUI), enabling TUN asks
 whether to shut the other device down (via sudo `ip link delete`), enable ours anyway
 (two TUNs fight over routes/DNS — not recommended), or cancel.
+
+On **macOS**, `setcap` is unavailable: the core must run as root. The default
+device is `utun1024`; existing settings must use an unused `utun<number>` name.
+Restart the core and open the TUI with the original user's configuration paths:
+
+```bash
+sudo env HOME="$HOME" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" "$(command -v mihomo-king)" restart
+sudo env HOME="$HOME" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" "$(command -v mihomo-king)"
+```
+
+Use the same prefix for CLI commands such as `tun on`, `tun off` and `stop`.
+Running only `sudo mihomo-king tun on` does not elevate a core that was already
+started by a regular user. macOS system `utun` interfaces are not automatically
+deleted; turn off any other VPN's TUN in its own app before enabling this one.
+Failed TUN changes restore the previous setting, and macOS reports TUN as on
+only when the configured interface is up.
 
 ## Star History
 

@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mihomo-king/internal/config"
+	"mihomo-king/internal/mihomo"
 )
 
 // Keep templates separate from user data and render at display time, including
@@ -155,6 +156,11 @@ func errorText(err error) text {
 	if t, ok := err.(text); ok {
 		return t
 	}
-	return message("%s", err.Error())
+	switch err {
+	case mihomo.ErrDarwinTunPrivileges, config.ErrInvalidTunDevice:
+		return message(err.Error())
+	default:
+		return message("%s", err.Error())
+	}
 }
 func (m *Model) setError(err error) { m.status, m.statusErr = errorText(err), true }

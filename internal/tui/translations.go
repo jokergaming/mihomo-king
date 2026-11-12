@@ -2,6 +2,8 @@ package tui
 
 // English templates are stable keys; arguments keep user content untranslated.
 var chinese = map[string]string{
+	"macOS TUN requires a root core; use sudo to restart mihomo-king with the same HOME and XDG_CONFIG_HOME (see README)": "macOS TUN 需要以 root 运行核心；请保留 HOME 和 XDG_CONFIG_HOME，使用 sudo 重启 mihomo-king（参见 README）",
+	"macOS TUN device must be utun followed by a number (for example utun1024); change tun device in settings":            "macOS TUN 设备名必须是 utun 加数字（例如 utun1024）；请在设置中修改 TUN 设备名",
 	"1 Dashboard":               "1 主界面",
 	"2 Subscriptions":           "2 订阅",
 	"3 Nodes":                   "3 节点",

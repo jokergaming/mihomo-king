@@ -94,9 +94,14 @@ func SwitchSub(s *config.Settings, name string) error {
 	return nil
 }
 
-// ApplyTun applies s.TunEnable (already set and saved by the caller): the
+// ApplyTun applies s.TunEnable without saving settings: the
 // config file is rewritten, mihomo toggles TUN live, sing-box is restarted.
 func ApplyTun(s *config.Settings) error {
+	if s.TunEnable {
+		if err := CheckTunPrivileges(s); err != nil {
+			return err
+		}
+	}
 	if err := s.WriteActiveFromStore(); err != nil {
 		return err
 	}
@@ -110,6 +115,9 @@ func ApplyTun(s *config.Settings) error {
 		if err := Restart(s); err != nil {
 			return fmt.Errorf("restart for tun change: %w", err)
 		}
+	}
+	if running {
+		return verifyTun(s)
 	}
 	return nil
 }

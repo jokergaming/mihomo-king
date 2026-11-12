@@ -197,8 +197,9 @@ func tunCmd() *cobra.Command {
 		Use:   "tun [on|off|toggle]",
 		Short: "Show or switch TUN mode",
 		Long: `Without an argument, print whether TUN is on. Enabling TUN needs the core
-binary to carry cap_net_admin,cap_net_raw (sudo setcap once, or use the TUI's
-t key which can do it for you). Enabling is refused while another TUN device
+binary to carry cap_net_admin,cap_net_raw on Linux (sudo setcap once, or use
+the TUI's t key). On macOS the core must be started as root using sudo, with
+the same HOME and XDG_CONFIG_HOME (see README). Enabling is refused while another TUN device
 (e.g. another clash's "Meta") is up unless --force is given.`,
 		Args: cobra.MatchAll(cobra.MaximumNArgs(1), cobra.OnlyValidArgs),
 		ValidArgs: []cobra.Completion{
@@ -215,6 +216,9 @@ t key which can do it for you). Enabling is refused while another TUN device
 			}
 			want := args[0] == "on" || args[0] == "toggle" && !current
 			if want {
+				if err := mihomo.CheckTunPrivileges(s); err != nil {
+					return err
+				}
 				if mihomo.MissingTunCaps(s) {
 					return fmt.Errorf("%s lacks net caps; run: sudo setcap cap_net_admin,cap_net_raw=ep %s (then restart)", s.ToolLabel(), s.Binary())
 				}
@@ -222,11 +226,7 @@ t key which can do it for you). Enabling is refused while another TUN device
 					return fmt.Errorf("other TUN devices are up (%s); two TUNs fight over routes — pass --force to enable anyway", strings.Join(foreign, ", "))
 				}
 			}
-			s.TunEnable = want
-			if err := s.Save(); err != nil {
-				return err
-			}
-			if err := mihomo.ApplyTun(s); err != nil {
+			if err := mihomo.SetTun(s, want); err != nil {
 				return err
 			}
 			fmt.Fprintln(out, "tun", onOff(want))

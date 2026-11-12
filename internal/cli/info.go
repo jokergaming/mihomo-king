@@ -40,7 +40,6 @@ func readStatus(s *config.Settings) status {
 		Controller:   s.Controller,
 		MixedPort:    s.MixedPort,
 		Mode:         s.Mode,
-		Tun:          s.TunEnable,
 		TunDevice:    s.TunDevice,
 		Subscription: s.Active,
 		LocalNodes:   len(s.LocalNodes),
@@ -63,7 +62,7 @@ func readStatus(s *config.Settings) status {
 			if cfg, err := c.Configs(); err == nil {
 				st.Mode = cfg.Mode
 				if s.Tool() == config.ToolMihomo {
-					st.Tun = cfg.Tun.Enable
+					st.Tun = mihomo.TunEnabled(s, cfg.Tun.Enable)
 				}
 			}
 			if s.Tool() == config.ToolSingBox {
@@ -72,6 +71,9 @@ func readStatus(s *config.Settings) status {
 		}
 	}
 	if s.TunEnable {
+		if err := mihomo.CheckTunPrivileges(s); err != nil {
+			st.Warnings = append(st.Warnings, err.Error())
+		}
 		if mihomo.MissingTunCaps(s) {
 			st.Warnings = append(st.Warnings, fmt.Sprintf("%s lacks cap_net_admin/cap_net_raw; TUN will fail (sudo setcap cap_net_admin,cap_net_raw=ep %s)", s.ToolLabel(), s.Binary()))
 		}

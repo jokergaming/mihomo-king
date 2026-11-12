@@ -2,6 +2,7 @@ package config
 
 import (
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -52,8 +53,8 @@ rules:
 	if got := inbounds[1]["address"]; !sameStrings(got, []string{"172.19.0.1/30"}) {
 		t.Fatalf("tun address = %#v, want 172.19.0.1/30", got)
 	}
-	if inbounds[1]["auto_redirect"] != true {
-		t.Fatalf("tun auto_redirect = %v, want true", inbounds[1]["auto_redirect"])
+	if inbounds[1]["auto_redirect"] != (runtime.GOOS == "linux") {
+		t.Fatalf("tun auto_redirect = %v on %s", inbounds[1]["auto_redirect"], runtime.GOOS)
 	}
 	if _, ok := inbounds[1]["auto_detect_interface"]; ok {
 		t.Fatalf("auto_detect_interface must not be written to tun inbound: %#v", inbounds[1])

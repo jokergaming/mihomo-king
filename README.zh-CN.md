@@ -123,8 +123,8 @@ jj git push --bookmark main --tag vX.X
 - `linux-amd64-musl`
 - `linux-arm64-glibc`（默认）
 - `linux-arm64-musl`
-- `darwin-amd64`
-- `darwin-arm64`
+- `darwin-amd64`（Intel 芯片 Mac）
+- `darwin-arm64`（Apple 芯片 Mac，M 系列）
 
 程序将选中的核心作为后台子进程管理，在主界面启动或停止它，并通过兼容 Clash 的 API 进行实时控制。
 应用设置保存在 `${XDG_CONFIG_HOME:-~/.config}/mihomo-king/`；mihomo 的运行配置保存在
@@ -132,7 +132,7 @@ jj git push --bookmark main --tag vX.X
 
 ## TUN 权限
 
-创建 TUN 设备需要 `CAP_NET_ADMIN` 和 `CAP_NET_RAW` 权限。
+Linux 上创建 TUN 设备需要 `CAP_NET_ADMIN` 和 `CAP_NET_RAW` 权限。
 在主界面启用 TUN 时，如果代理核心缺少这些权限，程序会在界面内提示输入 sudo 密码（隐藏显示），
 执行 `setcap` 后重启核心使权限生效。也可以提前手动授予权限：
 
@@ -141,8 +141,22 @@ sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v mihomo)"
 sudo setcap cap_net_admin,cap_net_raw=ep "$(command -v sing-box)"
 ```
 
-如果其他 TUN 设备已经启用，例如同时运行的 Clash 图形客户端，程序会询问是否使用 sudo 关闭其他设备、
+Linux 上如果其他 TUN 设备已经启用，例如同时运行的 Clash 图形客户端，程序会询问是否使用 sudo 关闭其他设备、
 仍然启用本程序的 TUN，或取消操作。多个 TUN 会争用路由和 DNS，不建议同时开启。
+
+**macOS** 不支持 `setcap`，代理核心必须以 root 运行。默认设备名为 `utun1024`；
+已有配置需在设置中使用未被占用的 `utun<数字>` 设备名。
+保留原用户的配置路径，重启核心后打开界面：
+
+```bash
+sudo env HOME="$HOME" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" "$(command -v mihomo-king)" restart
+sudo env HOME="$HOME" XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}" "$(command -v mihomo-king)"
+```
+
+CLI 的 `tun on`、`tun off`、`stop` 等命令也使用相同前缀。
+仅执行 `sudo mihomo-king tun on` 无法提升已由普通用户启动的核心权限，必须先重启核心。
+程序不会自动删除 macOS 系统的 `utun` 接口；如有其他 VPN，请先在对应应用中关闭其 TUN。
+TUN 切换失败会恢复之前的设置，macOS 上仅在配置的接口确实启动后才显示 TUN 已开启。
 
 ## Star History
 

@@ -47,13 +47,8 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, restartCmd(m.settings)
 	case "t":
 		if m.settings.TunEnable {
-			// disabling needs no privileges and no checks
-			m.settings.TunEnable = false
-			if err := m.settings.Save(); err != nil {
-				m.setError(err)
-				return m, nil
-			}
-			return m, toggleTunCmd(m.settings)
+			m.coreBusy = true
+			return m, toggleTunCmd(m.settings, false)
 		}
 		return m.beginTunEnable()
 	case "r":
@@ -85,6 +80,7 @@ func (m Model) afterForeignChoice(delDevs []string) (tea.Model, tea.Cmd) {
 		return m, m.pwInput.Focus()
 	}
 	m.tunStage = tunIdle
+	m.coreBusy = true
 	m.setStatus("enabling TUN…")
 	return m, enableTunCmd(m.settings, "", nil)
 }
@@ -124,6 +120,7 @@ func (m Model) updateTunPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.tunStage = tunIdle
+				m.coreBusy = true
 				m.setStatus("enabling TUN (sudo)…")
 				return m, enableTunCmd(m.settings, pw, m.tunDelDevs)
 			}

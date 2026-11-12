@@ -414,7 +414,7 @@ func defaults() *Settings {
 		XrayBin:     findXrayBin(),
 		XrayDir:     defaultXrayDir(),
 		Controller:  "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
-		TunDevice:   "mihomo-king",    // not the default "Meta": avoid colliding with another instance's tun
+		TunDevice:   defaultTunDevice(),
 		TunAddress:  "172.19.0.1/30",
 		MixedPort:   7890,
 		Mode:        "rule",
@@ -452,7 +452,7 @@ func (s *Settings) applyDefaults() {
 		s.Controller = "127.0.0.1:9091"
 	}
 	if s.TunDevice == "" {
-		s.TunDevice = "mihomo-king"
+		s.TunDevice = defaultTunDevice()
 	}
 	if s.TunAddress == "" {
 		s.TunAddress = "172.19.0.1/30"

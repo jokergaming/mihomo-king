@@ -94,7 +94,7 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		running, pid := mihomo.Running(s)
-		msg := statusMsg{running: running, pid: pid, mode: s.Mode, tun: s.TunEnable}
+		msg := statusMsg{running: running, pid: pid, mode: s.Mode}
 		if running {
 			if s.Tool() == config.ToolXray {
 				msg.version = mihomo.CoreVersion(s)
@@ -112,7 +112,7 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 				if cfg, err := c.Configs(); err == nil {
 					msg.mode = cfg.Mode
 					if s.Tool() == config.ToolMihomo {
-						msg.tun = cfg.Tun.Enable
+						msg.tun = mihomo.TunEnabled(s, cfg.Tun.Enable)
 					}
 					if cfg.Mode == "direct" {
 						msg.nodes = []text{message("%s", "DIRECT")}
@@ -166,17 +166,15 @@ func restartCmd(s *config.Settings) tea.Cmd {
 	}
 }
 
-// toggleTunCmd assumes s.TunEnable has already been flipped and saved.
-func toggleTunCmd(s *config.Settings) tea.Cmd {
-	want := s.TunEnable
+func toggleTunCmd(s *config.Settings, want bool) tea.Cmd {
 	return func() tea.Msg {
-		if err := mihomo.ApplyTun(s); err != nil {
-			return actionMsg{err: err}
+		if err := mihomo.SetTun(s, want); err != nil {
+			return coreActionMsg{actionMsg{err: err}}
 		}
 		if want {
-			return actionMsg{note: message("TUN on")}
+			return coreActionMsg{actionMsg{note: message("TUN on")}}
 		}
-		return actionMsg{note: message("TUN off")}
+		return coreActionMsg{actionMsg{note: message("TUN off")}}
 	}
 }
 
@@ -185,33 +183,33 @@ func toggleTunCmd(s *config.Settings) tea.Cmd {
 // in this closure and is never persisted or logged.
 func enableTunCmd(s *config.Settings, password string, delDevs []string) tea.Cmd {
 	return func() tea.Msg {
+		if err := mihomo.CheckTunPrivileges(s); err != nil {
+			return coreActionMsg{actionMsg{err: err}}
+		}
 		for _, dev := range delDevs {
 			if err := mihomo.DeleteTunDevice(password, dev); err != nil {
-				return actionMsg{err: message("shut down %s: %v", dev, err)}
+				return coreActionMsg{actionMsg{err: message("shut down %s: %v", dev, err)}}
 			}
 		}
 		needRestart := false
 		if mihomo.MissingTunCaps(s) {
 			if password == "" {
-				return actionMsg{err: message("%s lacks net caps; press t again to enter the sudo password", s.ToolLabel())}
+				return coreActionMsg{actionMsg{err: message("%s lacks net caps; press t again to enter the sudo password", s.ToolLabel())}}
 			}
 			if err := mihomo.GrantNetCaps(password, s.Binary()); err != nil {
-				return actionMsg{err: err}
+				return coreActionMsg{actionMsg{err: err}}
 			}
 			needRestart = true // caps are read at exec time; the running process doesn't gain them
 		}
-		s.TunEnable = true
-		if err := s.Save(); err != nil {
-			return actionMsg{err: err}
-		}
 		if running, _ := mihomo.Running(s); running && needRestart {
 			if err := mihomo.Restart(s); err != nil {
-				return actionMsg{err: message("restart after setcap: %v", err)}
+				return coreActionMsg{actionMsg{err: message("restart after setcap: %v", err)}}
 			}
-		} else if err := mihomo.ApplyTun(s); err != nil {
-			return actionMsg{err: err}
 		}
-		return actionMsg{note: message("TUN on")}
+		if err := mihomo.SetTun(s, true); err != nil {
+			return coreActionMsg{actionMsg{err: err}}
+		}
+		return coreActionMsg{actionMsg{note: message("TUN on")}}
 	}
 }
 
