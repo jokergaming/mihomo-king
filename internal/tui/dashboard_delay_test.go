@@ -11,12 +11,86 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
 )
+
+func TestDashboardDelayPeriodicRefresh(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second}, subs: newList("Subscriptions")}
+		snapshot := statusMsg{running: true, nodes: []dashboardNode{
+			{text: message("%s", "HK"), target: "HK"},
+			{text: message("%s", "JP"), target: "JP"},
+		}}
+		started := time.Now()
+		m, cmd := press(m, snapshot)
+		if cmd == nil || m.dashboardDelayPending != 2 {
+			t.Fatal("initial test did not start")
+		}
+		epoch := m.dashboardDelayEpoch
+		time.Sleep(2 * time.Second)
+		m, cmd = press(m, dashboardDelayMsg{epoch: epoch, node: "HK", delay: 25})
+		if cmd != nil {
+			t.Fatal("timer scheduled before every node completed")
+		}
+		m, cmd = press(m, dashboardDelayMsg{epoch: epoch, node: "JP", err: errors.New("timeout")})
+		if cmd == nil {
+			t.Fatal("last result did not schedule refresh")
+		}
+		tick := cmd()
+		if elapsed := time.Since(started); elapsed != 10*time.Second {
+			t.Fatalf("refresh after %v, want 10s from test start", elapsed)
+		}
+		m, cmd = press(m, tick)
+		if cmd == nil || m.dashboardDelays != nil {
+			t.Fatal("timer did not refresh runtime nodes")
+		}
+		m, cmd = press(m, snapshot)
+		if cmd == nil || m.dashboardDelayPending != 2 {
+			t.Fatal("timer did not start next test")
+		}
+		if _, cmd := press(m, tick); cmd != nil {
+			t.Fatal("old timer started a duplicate test")
+		}
+		// A test slower than the interval finishes before the next round starts.
+		time.Sleep(12 * time.Second)
+		if _, cmd := press(m, snapshot); cmd != nil {
+			t.Fatal("status poll overlapped a slow test")
+		}
+		epoch = m.dashboardDelayEpoch
+		m, _ = press(m, dashboardDelayMsg{epoch: epoch, node: "HK", delay: 50})
+		m, cmd = press(m, dashboardDelayMsg{epoch: epoch, node: "JP", delay: 60})
+		if cmd == nil {
+			t.Fatal("slow test did not schedule next round")
+		}
+		tick = cmd()
+		m, _ = m.switchScreen(screenSubs)
+		if _, cmd := press(m, tick); cmd != nil {
+			t.Fatal("timer kept testing outside dashboard")
+		}
+	})
+}
+
+func TestDashboardDelayDisabled(t *testing.T) {
+	m := Model{settings: &config.Settings{DashboardLatencyInterval: 10 * time.Second}}
+	snapshot := statusMsg{running: true, nodes: []dashboardNode{{text: message("%s", "HK"), target: "HK"}}}
+	m, cmd := press(m, snapshot)
+	if cmd != nil || strings.Contains(m.viewDashboard(), "latency:") {
+		t.Fatal("disabled dashboard displayed or tested latency")
+	}
+	if _, cmd := press(m, dashboardDelayTickMsg{epoch: m.dashboardDelayEpoch}); cmd != nil {
+		t.Fatal("disabled dashboard accepted a timer")
+	}
+	m, _ = m.refreshDashboard()
+	if _, cmd := press(m, snapshot); cmd != nil {
+		t.Fatal("manual refresh ignored disabled preference")
+	}
+}
 
 func TestDashboardDelayRefreshLifecycle(t *testing.T) {
 	var calls atomic.Int32
@@ -37,7 +111,7 @@ func TestDashboardDelayRefreshLifecycle(t *testing.T) {
 		"HK/one": {Type: "SS"},
 	}
 	snapshot := statusMsg{running: true, pid: 42, nodes: proxyNodeRoutes(proxies, "rule")}
-	m := Model{settings: &config.Settings{Controller: srv.URL, Secret: "secret", TestURL: "https://example.com/check?a=1&b=2"}}
+	m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second, Controller: srv.URL, Secret: "secret", TestURL: "https://example.com/check?a=1&b=2"}}
 	m, cmd := press(m, snapshot)
 	if cmd == nil || !strings.Contains(m.viewDashboard(), "latency: testing…") {
 		t.Fatal("first dashboard status did not start a delay test")
@@ -122,7 +196,7 @@ func TestDashboardDelayFailuresAndLanguage(t *testing.T) {
 				fmt.Fprint(w, tt.body)
 			}))
 			defer srv.Close()
-			m := Model{settings: &config.Settings{Controller: srv.URL}}
+			m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second, Controller: srv.URL}}
 			m, cmd := press(m, statusMsg{running: true, nodes: []dashboardNode{{text: message("%s", "HK"), target: "HK"}}})
 			result := cmd().(dashboardDelayMsg)
 			if tt.status == http.StatusUnauthorized && !errors.Is(result.err, api.ErrUnauthorized) {
@@ -144,7 +218,7 @@ func TestDashboardDelayFailuresAndLanguage(t *testing.T) {
 func TestDashboardReturnKeysResetLatency(t *testing.T) {
 	for _, from := range []screen{screenSubs, screenNodes, screenSettings} {
 		for _, key := range []tea.KeyMsg{{Type: tea.KeyEsc}, keyRunes("1")} {
-			m := New(&config.Settings{})
+			m := New(&config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second})
 			m.screen = from
 			m.dashboardDelays = map[string]dashboardDelayMsg{"HK": {delay: 123}}
 			m, cmd := press(m, key)
@@ -159,7 +233,7 @@ func TestDashboardSkipsNonProxyRoutes(t *testing.T) {
 	for _, kind := range []string{"Direct", "Reject", "RejectDrop", "Pass", "LoadBalance"} {
 		t.Run(kind, func(t *testing.T) {
 			proxies := map[string]api.Proxy{"GLOBAL": {Now: "special", All: []string{"special"}}, "special": {Type: kind}}
-			m := Model{settings: &config.Settings{}}
+			m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second}}
 			m, cmd := press(m, statusMsg{running: true, nodes: proxyNodeRoutes(proxies, "global")})
 			if cmd != nil || strings.Contains(m.viewDashboard(), "latency:") {
 				t.Fatal("non-proxy route should not be tested")
@@ -191,7 +265,7 @@ func TestXrayDashboardDelayUsesRuntimePort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := Model{settings: &config.Settings{ManagedTool: config.ToolXray, MixedPort: 1, XrayNode: "saved-but-not-active", TestURL: "http://latency.invalid/check"}}
+	m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second, ManagedTool: config.ToolXray, MixedPort: 1, XrayNode: "saved-but-not-active", TestURL: "http://latency.invalid/check"}}
 	snapshot := statusMsg{running: true, nodes: routes}
 	m, cmd := press(m, snapshot)
 	result := cmd().(dashboardDelayMsg)

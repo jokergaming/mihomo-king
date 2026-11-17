@@ -5,11 +5,13 @@ package config
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"gopkg.in/yaml.v3"
@@ -69,6 +71,9 @@ type Settings struct {
 	LocalNodes    []LocalNode    `yaml:"local_nodes,omitempty"`
 	Chain         *ProxyChain    `yaml:"chain,omitempty"`
 
+	DashboardLatencyEnabled  bool          `yaml:"dashboard_latency_enabled"`
+	DashboardLatencyInterval time.Duration `yaml:"dashboard_latency_interval,omitempty"`
+
 	appDir string // resolved at Load; not persisted
 }
 
@@ -77,6 +82,15 @@ const (
 	ToolSingBox = "sing-box"
 	ToolXray    = "xray"
 )
+
+var ErrDashboardLatencyInterval = errors.New("dashboard latency interval must be at least 1s (e.g. 10s or 1m)")
+
+func ValidateDashboardLatencyInterval(interval time.Duration) error {
+	if interval < time.Second {
+		return ErrDashboardLatencyInterval
+	}
+	return nil
+}
 
 // Load reads settings.yaml (creating it with defaults if absent), ensures the
 // app directories and a secret exist, and persists any fill-ins.
@@ -104,6 +118,9 @@ func Load() (*Settings, error) {
 	}
 
 	s.applyDefaults()
+	if err := ValidateDashboardLatencyInterval(s.DashboardLatencyInterval); err != nil {
+		return nil, err
+	}
 	s.ensureSecret()
 	s.Language, err = s.LoadLanguage()
 	if err != nil {
@@ -406,20 +423,22 @@ func ValidateSubName(name string) error {
 
 func defaults() *Settings {
 	return &Settings{
-		ManagedTool: detectManagedTool(),
-		MihomoBin:   findMihomoBin(),
-		MihomoDir:   defaultMihomoDir(),
-		SingBoxBin:  findSingBoxBin(),
-		SingBoxDir:  defaultSingBoxDir(),
-		XrayBin:     findXrayBin(),
-		XrayDir:     defaultXrayDir(),
-		Controller:  "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
-		TunDevice:   defaultTunDevice(),
-		TunAddress:  "172.19.0.1/30",
-		MixedPort:   7890,
-		Mode:        "rule",
-		LogLevel:    "info",
-		TestURL:     "http://www.gstatic.com/generate_204",
+		ManagedTool:              detectManagedTool(),
+		MihomoBin:                findMihomoBin(),
+		MihomoDir:                defaultMihomoDir(),
+		SingBoxBin:               findSingBoxBin(),
+		SingBoxDir:               defaultSingBoxDir(),
+		XrayBin:                  findXrayBin(),
+		XrayDir:                  defaultXrayDir(),
+		Controller:               "127.0.0.1:9091", // not 9090: avoid colliding with a typical clash/meta controller
+		TunDevice:                defaultTunDevice(),
+		TunAddress:               "172.19.0.1/30",
+		MixedPort:                7890,
+		Mode:                     "rule",
+		LogLevel:                 "info",
+		TestURL:                  "http://www.gstatic.com/generate_204",
+		DashboardLatencyEnabled:  true,
+		DashboardLatencyInterval: 10 * time.Second,
 	}
 }
 

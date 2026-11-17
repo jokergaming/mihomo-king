@@ -1,11 +1,55 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestDashboardLatencySettingsDefaultsAndPersistence(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.DashboardLatencyEnabled || s.DashboardLatencyInterval != 10*time.Second {
+		t.Fatalf("new settings: enabled=%v interval=%v", s.DashboardLatencyEnabled, s.DashboardLatencyInterval)
+	}
+	path := filepath.Join(s.AppDir(), "settings.yaml")
+	if err := os.WriteFile(path, []byte("managed_tool: mihomo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Load()
+	if err != nil || !s.DashboardLatencyEnabled || s.DashboardLatencyInterval != 10*time.Second {
+		t.Fatalf("old settings did not receive defaults: %v, %v", s, err)
+	}
+	s.DashboardLatencyEnabled = false
+	s.DashboardLatencyInterval = time.Minute
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Load()
+	if err != nil || s.DashboardLatencyEnabled || s.DashboardLatencyInterval != time.Minute {
+		t.Fatalf("preferences did not survive reload: %v, %v", s, err)
+	}
+	for _, interval := range []string{"0s", "-1s", "500ms", "invalid"} {
+		body := "dashboard_latency_interval: " + interval + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load()
+		if err == nil || interval != "invalid" && !errors.Is(err, ErrDashboardLatencyInterval) {
+			t.Fatalf("invalid interval %q was not rejected: %v", interval, err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != body {
+			t.Fatalf("invalid configuration was overwritten: %q, %v", got, err)
+		}
+	}
+}
 
 func TestValidateSubName(t *testing.T) {
 	tests := []struct {

@@ -4,6 +4,7 @@ package tui
 import (
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -54,18 +55,21 @@ type Model struct {
 	statusErr bool
 
 	// dashboard (live state)
-	running             bool
-	pid                 int
-	version             string
-	liveMode            string
-	liveTun             bool
-	capWarn             bool
-	foreignTun          []string
-	liveNodes           []dashboardNode
-	nodeErr             error
-	coreBusy            bool
-	dashboardDelayEpoch uint64
-	dashboardDelays     map[string]dashboardDelayMsg
+	running               bool
+	pid                   int
+	version               string
+	liveMode              string
+	liveTun               bool
+	capWarn               bool
+	foreignTun            []string
+	liveNodes             []dashboardNode
+	nodeErr               error
+	coreBusy              bool
+	dashboardDelayEpoch   uint64
+	dashboardDelays       map[string]dashboardDelayMsg
+	dashboardDelayPending int
+	dashboardDelayNext    time.Time
+	dashboardSettingsBusy bool
 
 	// tun enable flow (dashboard modal)
 	tunStage   tunStage
@@ -225,9 +229,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.beginDashboardDelays()
 
 	case dashboardDelayMsg:
-		if msg.epoch == m.dashboardDelayEpoch && m.dashboardDelays != nil {
+		if msg.epoch == m.dashboardDelayEpoch && m.dashboardDelays != nil && m.settings.DashboardLatencyEnabled {
+			if _, received := m.dashboardDelays[msg.node]; received {
+				return m, nil
+			}
 			m.dashboardDelays[msg.node] = msg
+			m.dashboardDelayPending--
+			if m.dashboardDelayPending == 0 && m.screen == screenDashboard {
+				return m, dashboardDelayTickCmd(msg.epoch, time.Until(m.dashboardDelayNext))
+			}
 		}
+		return m, nil
+
+	case dashboardDelayTickMsg:
+		if msg.epoch != m.dashboardDelayEpoch || m.screen != screenDashboard || !m.settings.DashboardLatencyEnabled || !m.running {
+			return m, nil
+		}
+		return m.refreshDashboard()
+
+	case dashboardSettingsSavedMsg:
+		m.dashboardSettingsBusy = false
+		if msg.err != nil {
+			m.setError(msg.err)
+			return m, nil
+		}
+		m.settings.DashboardLatencyEnabled = msg.enabled
+		m.settings.DashboardLatencyInterval = msg.interval
+		m.editingSetting = false
+		m.settingInput.Blur()
+		m.clearDashboardDelays()
+		m.reloadSettings()
+		m.setStatus("setting saved")
 		return m, nil
 
 	case tickMsg:
@@ -426,6 +458,9 @@ func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 
 // switchScreen activates a screen and kicks off its data refresh.
 func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
+	if m.screen == screenDashboard && s != screenDashboard {
+		m.clearDashboardDelays()
+	}
 	m.screen = s
 	if s != screenNodes {
 		m.chainEntry = ""

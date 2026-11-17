@@ -157,7 +157,7 @@ func errorText(err error) text {
 		return t
 	}
 	switch err {
-	case mihomo.ErrDarwinTunPrivileges, config.ErrInvalidTunDevice:
+	case mihomo.ErrDarwinTunPrivileges, config.ErrInvalidTunDevice, config.ErrDashboardLatencyInterval:
 		return message(err.Error())
 	default:
 		return message("%s", err.Error())

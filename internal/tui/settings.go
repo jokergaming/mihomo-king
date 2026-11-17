@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,23 +20,28 @@ import (
 )
 
 const (
-	settingTool       = "managed_tool"
-	settingMihomoBin  = "mihomo_bin"
-	settingSingBoxBin = "sing_box_bin"
-	settingXrayBin    = "xray_bin"
-	settingCoreGet    = "core_download"
-	settingGeoGet     = "geo_download"
-	settingController = "controller"
-	settingMixedPort  = "mixed_port"
-	settingTunDevice  = "tun_device"
-	settingTunAddress = "tun_address"
-	settingTestURL    = "test_url"
-	settingMode       = "mode"
-	settingLogLevel   = "log_level"
-	settingAutostart  = "autostart"
+	settingTool              = "managed_tool"
+	settingMihomoBin         = "mihomo_bin"
+	settingSingBoxBin        = "sing_box_bin"
+	settingXrayBin           = "xray_bin"
+	settingCoreGet           = "core_download"
+	settingGeoGet            = "geo_download"
+	settingController        = "controller"
+	settingMixedPort         = "mixed_port"
+	settingTunDevice         = "tun_device"
+	settingTunAddress        = "tun_address"
+	settingTestURL           = "test_url"
+	settingMode              = "mode"
+	settingLogLevel          = "log_level"
+	settingAutostart         = "autostart"
+	settingDashboardLatency  = "dashboard_latency_enabled"
+	settingDashboardInterval = "dashboard_latency_interval"
 )
 
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.dashboardSettingsBusy {
+		return m, nil
+	}
 	if m.tunStage == tunAskCoreCaps {
 		return m.updateCoreCapPrompt(msg)
 	}
@@ -86,6 +92,9 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	if sel.id == settingAutostart {
 		return m.beginAutostart(true)
 	}
+	if sel.id == settingDashboardLatency {
+		return m.saveDashboardSettings(!m.settings.DashboardLatencyEnabled, m.settings.DashboardLatencyInterval)
+	}
 	if sel.id == settingTool {
 		if m.running {
 			m.setErr("stop current tool before switching managed tool")
@@ -125,6 +134,14 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("cancelled")
 			return m, nil
 		case "enter":
+			if m.settingKey == settingDashboardInterval {
+				interval, err := time.ParseDuration(strings.TrimSpace(m.settingInput.Value()))
+				if err != nil || config.ValidateDashboardLatencyInterval(interval) != nil {
+					m.setError(config.ErrDashboardLatencyInterval)
+					return m, nil
+				}
+				return m.saveDashboardSettings(m.settings.DashboardLatencyEnabled, interval)
+			}
 			if m.settingKey == settingCoreGet {
 				tool, channel, err := parseCoreDownload(m.settingInput.Value())
 				if err != nil {
@@ -186,6 +203,8 @@ func (m Model) settingValue(key string) string {
 		return m.settings.TunAddress
 	case settingTestURL:
 		return m.settings.TestURL
+	case settingDashboardInterval:
+		return m.settings.DashboardLatencyInterval.String()
 	case settingMode:
 		return m.settings.Mode
 	case settingLogLevel:
@@ -257,6 +276,8 @@ func (m *Model) reloadSettings() {
 		item{title: m.tr("tun device"), desc: m.settings.TunDevice, id: settingTunDevice},
 		item{title: m.tr("tun address"), desc: m.settings.TunAddress, id: settingTunAddress},
 		item{title: m.tr("test url"), desc: m.settings.TestURL, id: settingTestURL},
+		item{title: m.tr("dashboard latency"), desc: m.tr("%s · show and test latency on dashboard · enter to toggle", message(autostartState(m.settings.DashboardLatencyEnabled))), id: settingDashboardLatency},
+		item{title: m.tr("latency refresh interval"), desc: m.settings.DashboardLatencyInterval.String(), id: settingDashboardInterval},
 		item{title: m.tr("mode"), desc: m.optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
 		item{title: m.tr("log level"), desc: m.optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
 	}
@@ -302,6 +323,8 @@ func (m Model) optionDesc(current string, options []string) string {
 
 func (m Model) settingPrompt(key string) string {
 	switch key {
+	case settingDashboardInterval:
+		return m.tr("latency refresh interval (e.g. 10s or 1m, minimum 1s)")
 	case settingCoreGet:
 		return m.tr("core channel (tab cycles mihomo/sing-box/xray and release/alpha)")
 	case settingGeoGet:
@@ -311,6 +334,23 @@ func (m Model) settingPrompt(key string) string {
 		return m.tr("%s (tab: %s)", m.settingLabel(key), strings.Join(options, " / "))
 	}
 	return m.settingLabel(key)
+}
+
+type dashboardSettingsSavedMsg struct {
+	enabled  bool
+	interval time.Duration
+	err      error
+}
+
+func (m Model) saveDashboardSettings(enabled bool, interval time.Duration) (Model, tea.Cmd) {
+	s := *m.settings
+	s.DashboardLatencyEnabled = enabled
+	s.DashboardLatencyInterval = interval
+	m.dashboardSettingsBusy = true
+	m.setStatus("saving %s…", message("dashboard latency"))
+	return m, func() tea.Msg {
+		return dashboardSettingsSavedMsg{enabled: enabled, interval: interval, err: s.Save()}
+	}
 }
 
 func (m Model) beginCoreCaps(tool, channel string) (tea.Model, tea.Cmd) {

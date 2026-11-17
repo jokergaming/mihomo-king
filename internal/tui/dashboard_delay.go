@@ -16,9 +16,18 @@ type dashboardDelayMsg struct {
 	err   error
 }
 
+type dashboardDelayTickMsg struct{ epoch uint64 }
+
+func dashboardDelayTickCmd(epoch uint64, after time.Duration) tea.Cmd {
+	return tea.Tick(max(0, after), func(time.Time) tea.Msg {
+		return dashboardDelayTickMsg{epoch: epoch}
+	})
+}
+
 func (m *Model) clearDashboardDelays() {
 	m.dashboardDelayEpoch++
 	m.dashboardDelays = nil
+	m.dashboardDelayPending = 0
 }
 
 func (m Model) refreshDashboard() (Model, tea.Cmd) {
@@ -27,10 +36,11 @@ func (m Model) refreshDashboard() (Model, tea.Cmd) {
 }
 
 func (m *Model) beginDashboardDelays() tea.Cmd {
-	if m.screen != screenDashboard || !m.running || m.nodeErr != nil || m.dashboardDelays != nil {
+	if !m.settings.DashboardLatencyEnabled || m.screen != screenDashboard || !m.running || m.nodeErr != nil || m.dashboardDelays != nil {
 		return nil
 	}
 	m.dashboardDelays = make(map[string]dashboardDelayMsg)
+	m.dashboardDelayNext = time.Now().Add(m.settings.DashboardLatencyInterval)
 	// Capture settings before commands run; UI edits must not change an in-flight test.
 	s := *m.settings
 	epoch := m.dashboardDelayEpoch
@@ -44,6 +54,7 @@ func (m *Model) beginDashboardDelays() tea.Cmd {
 			continue
 		}
 		seen[node] = true
+		m.dashboardDelayPending++
 		cmds = append(cmds, func() tea.Msg {
 			sem <- struct{}{}
 			defer func() { <-sem }()
@@ -63,7 +74,7 @@ func (m *Model) beginDashboardDelays() tea.Cmd {
 }
 
 func (m Model) dashboardDelayLabel(node string) string {
-	if node == "" {
+	if node == "" || !m.settings.DashboardLatencyEnabled {
 		return ""
 	}
 	result, ok := m.dashboardDelays[node]
