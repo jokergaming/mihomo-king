@@ -28,7 +28,7 @@ type statusMsg struct {
 	tun        bool
 	capWarn    bool
 	foreignTun []string // other live TUN devices (e.g. another clash's "Meta")
-	nodes      []text
+	nodes      []dashboardNode
 	nodeErr    error
 }
 
@@ -99,11 +99,7 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 			if s.Tool() == config.ToolXray {
 				msg.version = mihomo.CoreVersion(s)
 				msg.tun = s.TunEnable && mihomo.TunDeviceUp(s.TunDevice)
-				routes, err := xrayNodeRoutes(s.ConfigPath())
-				msg.nodeErr = err
-				for _, route := range routes {
-					msg.nodes = append(msg.nodes, message("%s", route))
-				}
+				msg.nodes, msg.nodeErr = xrayNodeRoutes(s.ConfigPath())
 			} else {
 				c := api.New(controller, secret)
 				if v, err := c.Version(); err == nil {
@@ -115,7 +111,7 @@ func refreshStatusCmd(s *config.Settings) tea.Cmd {
 						msg.tun = mihomo.TunEnabled(s, cfg.Tun.Enable)
 					}
 					if cfg.Mode == "direct" {
-						msg.nodes = []text{message("%s", "DIRECT")}
+						msg.nodes = proxyNodeRoutes(nil, cfg.Mode)
 					} else {
 						proxies, err := c.Proxies()
 						msg.nodeErr = err

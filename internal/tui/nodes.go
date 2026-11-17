@@ -32,8 +32,7 @@ func (m Model) updateNodes(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showGroups()
 				return m, nil
 			}
-			m.screen = screenDashboard
-			return m, refreshStatusCmd(m.settings)
+			return m.switchScreen(screenDashboard)
 		case "enter":
 			return m.nodesEnter()
 		case "c":

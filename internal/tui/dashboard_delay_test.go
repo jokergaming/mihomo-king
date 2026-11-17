@@ -1,0 +1,209 @@
+package tui
+
+import (
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"mihomo-king/internal/api"
+	"mihomo-king/internal/config"
+)
+
+func TestDashboardDelayRefreshLifecycle(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/proxies/HK/one/delay" || r.URL.Query().Get("url") != "https://example.com/check?a=1&b=2" || r.URL.Query().Get("timeout") != "5000" {
+			t.Errorf("unexpected delay request: %s", r.URL)
+		}
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			t.Error("missing delay authentication")
+		}
+		fmt.Fprint(w, `{"delay":123}`)
+	}))
+	defer srv.Close()
+	proxies := map[string]api.Proxy{
+		"Proxy":  {Type: "Selector", Now: "Auto", All: []string{"Auto"}},
+		"Auto":   {Type: "URLTest", Now: "HK/one", All: []string{"HK/one"}},
+		"HK/one": {Type: "SS"},
+	}
+	snapshot := statusMsg{running: true, pid: 42, nodes: proxyNodeRoutes(proxies, "rule")}
+	m := Model{settings: &config.Settings{Controller: srv.URL, Secret: "secret", TestURL: "https://example.com/check?a=1&b=2"}}
+	m, cmd := press(m, snapshot)
+	if cmd == nil || !strings.Contains(m.viewDashboard(), "latency: testing…") {
+		t.Fatal("first dashboard status did not start a delay test")
+	}
+	// One command means the nested groups sharing a leaf did not duplicate requests.
+	result, ok := cmd().(dashboardDelayMsg)
+	if !ok || result.err != nil || result.delay != 123 || calls.Load() != 1 {
+		t.Fatalf("delay test = %+v, requests = %d", result, calls.Load())
+	}
+	m, _ = press(m, result)
+	if got := m.viewDashboard(); strings.Count(got, "latency: 123 ms") != 2 {
+		t.Fatalf("delay missing beside shared routes: %s", got)
+	}
+	if _, cmd := press(m, snapshot); cmd != nil {
+		t.Fatal("unchanged background status started another delay test")
+	}
+
+	for _, reopen := range []string{"r", "return", "resume"} {
+		t.Run(reopen, func(t *testing.T) {
+			switch reopen {
+			case "return":
+				m.screen = screenNodes
+				m, cmd = m.switchScreen(screenDashboard)
+			case "resume":
+				m, cmd = press(m, tea.ResumeMsg{})
+			default:
+				m, cmd = press(m, keyRunes("r"))
+			}
+			if cmd == nil || strings.Contains(m.viewDashboard(), "123 ms") {
+				t.Fatal("reopening retained the old delay or skipped status refresh")
+			}
+			m, cmd = press(m, snapshot)
+			if cmd == nil {
+				t.Fatal("reopening did not retest")
+			}
+			m, _ = press(m, result)
+			if strings.Contains(m.viewDashboard(), "123 ms") {
+				t.Fatal("late result from previous visit was accepted")
+			}
+			m, _ = press(m, cmd())
+			if !strings.Contains(m.viewDashboard(), "123 ms") {
+				t.Fatal("fresh result was not displayed")
+			}
+		})
+	}
+
+	proxies["Auto"] = api.Proxy{Type: "URLTest", Now: "JP", All: []string{"JP"}}
+	proxies["JP"] = api.Proxy{Type: "Trojan"}
+	snapshot.nodes = proxyNodeRoutes(proxies, "rule")
+	m, cmd = press(m, snapshot)
+	if cmd == nil || strings.Contains(m.viewDashboard(), "123 ms") {
+		t.Fatal("changed selection retained old latency")
+	}
+	m, _ = press(m, result)
+	if strings.Contains(m.viewDashboard(), "123 ms") {
+		t.Fatal("old node result was accepted")
+	}
+	late := dashboardDelayMsg{epoch: m.dashboardDelayEpoch, node: "JP", delay: 99}
+	m, cmd = press(m, statusMsg{})
+	m, _ = press(m, late)
+	if cmd != nil || strings.Contains(m.viewDashboard(), "99 ms") || m.dashboardDelays != nil {
+		t.Fatal("stopped core retained latency or started testing")
+	}
+	m.screen = screenNodes
+	if _, cmd := press(m, snapshot); cmd != nil {
+		t.Fatal("background status outside dashboard started testing")
+	}
+}
+
+func TestDashboardDelayFailuresAndLanguage(t *testing.T) {
+	for _, tt := range []struct {
+		name, body, want string
+		status           int
+	}{
+		{"timeout", `{"message":"timeout"}`, "检测失败", http.StatusGatewayTimeout},
+		{"unauthorized", `{"message":"Unauthorized"}`, "检测失败", http.StatusUnauthorized},
+		{"zero", `{"delay":0}`, "不可用", http.StatusOK},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				fmt.Fprint(w, tt.body)
+			}))
+			defer srv.Close()
+			m := Model{settings: &config.Settings{Controller: srv.URL}}
+			m, cmd := press(m, statusMsg{running: true, nodes: []dashboardNode{{text: message("%s", "HK"), target: "HK"}}})
+			result := cmd().(dashboardDelayMsg)
+			if tt.status == http.StatusUnauthorized && !errors.Is(result.err, api.ErrUnauthorized) {
+				t.Fatalf("lost authorization error: %v", result.err)
+			}
+			// A language switch while the request runs must affect the result too.
+			m.settings.Language = config.LanguageChinese
+			if !strings.Contains(m.viewDashboard(), "延迟：检测中") {
+				t.Fatal("loading state was not translated")
+			}
+			m, _ = press(m, result)
+			if got := m.viewDashboard(); !strings.Contains(got, "延迟："+tt.want) || strings.Contains(got, "0 ms") {
+				t.Fatalf("invalid failure display: %s", got)
+			}
+		})
+	}
+}
+
+func TestDashboardReturnKeysResetLatency(t *testing.T) {
+	for _, from := range []screen{screenSubs, screenNodes, screenSettings} {
+		for _, key := range []tea.KeyMsg{{Type: tea.KeyEsc}, keyRunes("1")} {
+			m := New(&config.Settings{})
+			m.screen = from
+			m.dashboardDelays = map[string]dashboardDelayMsg{"HK": {delay: 123}}
+			m, cmd := press(m, key)
+			if m.screen != screenDashboard || cmd == nil || m.dashboardDelays != nil || m.dashboardDelayEpoch == 0 {
+				t.Fatalf("return from screen %d via %s did not reset latency", from, key.String())
+			}
+		}
+	}
+}
+
+func TestDashboardSkipsNonProxyRoutes(t *testing.T) {
+	for _, kind := range []string{"Direct", "Reject", "RejectDrop", "Pass", "LoadBalance"} {
+		t.Run(kind, func(t *testing.T) {
+			proxies := map[string]api.Proxy{"GLOBAL": {Now: "special", All: []string{"special"}}, "special": {Type: kind}}
+			m := Model{settings: &config.Settings{}}
+			m, cmd := press(m, statusMsg{running: true, nodes: proxyNodeRoutes(proxies, "global")})
+			if cmd != nil || strings.Contains(m.viewDashboard(), "latency:") {
+				t.Fatal("non-proxy route should not be tested")
+			}
+		})
+	}
+}
+
+func TestXrayDashboardDelayUsesRuntimePort(t *testing.T) {
+	var fail atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.String() != "http://latency.invalid/check" {
+			t.Errorf("unexpected proxied URL: %s", r.URL)
+		}
+		if fail.Load() {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	path := filepath.Join(t.TempDir(), "config.json")
+	body := fmt.Sprintf(`{"inbounds":[{"protocol":"mixed","port":%d}],"outbounds":[{"tag":"runtime-node","protocol":"trojan"}],"routing":{"rules":[{"network":"tcp,udp","outboundTag":"runtime-node"}]}}`, port)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := xrayNodeRoutes(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{settings: &config.Settings{ManagedTool: config.ToolXray, MixedPort: 1, XrayNode: "saved-but-not-active", TestURL: "http://latency.invalid/check"}}
+	snapshot := statusMsg{running: true, nodes: routes}
+	m, cmd := press(m, snapshot)
+	result := cmd().(dashboardDelayMsg)
+	if result.node != "runtime-node" || result.err != nil || result.delay <= 0 {
+		t.Fatalf("runtime proxy latency: %+v", result)
+	}
+	m, _ = press(m, result)
+	fail.Store(true)
+	m, _ = m.refreshDashboard()
+	m, cmd = press(m, snapshot)
+	result = cmd().(dashboardDelayMsg)
+	if result.err == nil || !strings.Contains(result.err.Error(), "502") {
+		t.Fatalf("proxy failure was hidden by fallback: %+v", result)
+	}
+}

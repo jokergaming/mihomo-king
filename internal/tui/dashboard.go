@@ -53,7 +53,7 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.beginTunEnable()
 	case "r":
 		m.setStatus("refreshing…")
-		return m, refreshStatusCmd(m.settings)
+		return m.refreshDashboard()
 	}
 	if nm, cmd, handled := m.globalKey(k.String()); handled {
 		return nm, cmd
@@ -177,7 +177,7 @@ func (m Model) viewDashboard() string {
 			if i == 0 {
 				label = m.tr("nodes")
 			}
-			row(label, m.render(node))
+			row(label, m.render(node.text)+m.dashboardDelayLabel(node.target))
 		}
 	}
 	row(m.tr("controller"), m.settings.Controller)

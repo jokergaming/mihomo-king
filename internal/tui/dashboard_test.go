@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
 )
@@ -84,6 +86,8 @@ func TestDashboardRefreshTracksRuntimeSelectionAndErrors(t *testing.T) {
 				return
 			}
 			fmt.Fprintf(w, `{"proxies":{"GLOBAL":{"type":"Selector","now":%q,"all":["HK","JP"]},"HK":{"type":"SS"},"JP":{"type":"Trojan"}}}`, node)
+		case "/proxies/HK/delay", "/proxies/JP/delay":
+			fmt.Fprint(w, `{"delay":77}`)
 		default:
 			t.Errorf("unexpected request: %s", r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -95,10 +99,14 @@ func TestDashboardRefreshTracksRuntimeSelectionAndErrors(t *testing.T) {
 	refresh := func() {
 		t.Helper()
 		msg := refreshStatusCmd(s)()
-		m, _ = press(m, msg)
+		var cmd tea.Cmd
+		m, cmd = press(m, msg)
+		if cmd != nil {
+			m, _ = press(m, cmd())
+		}
 	}
 	refresh()
-	if got := m.viewDashboard(); !strings.Contains(got, "GLOBAL → HK (SS)") {
+	if got := m.viewDashboard(); !strings.Contains(got, "GLOBAL → HK (SS)") || !strings.Contains(got, "77 ms") {
 		t.Fatalf("initial dashboard: %s", got)
 	}
 	node = "JP"
@@ -156,7 +164,7 @@ func TestXrayDashboardUsesRuntimeConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	routes, err := xrayNodeRoutes(path)
-	if err != nil || !slices.Equal(routes, []string{"JP (trojan)"}) {
+	if err != nil || !slices.Equal(renderedRoutes(routes), []string{"JP (trojan)"}) {
 		t.Fatalf("runtime routes = %v, %v", routes, err)
 	}
 	if err := os.WriteFile(path, []byte(`{"outbounds":[]}`), 0o600); err != nil {
@@ -167,7 +175,7 @@ func TestXrayDashboardUsesRuntimeConfig(t *testing.T) {
 	}
 }
 
-func renderedRoutes(routes []text) []string {
+func renderedRoutes(routes []dashboardNode) []string {
 	result := make([]string, len(routes))
 	for i, route := range routes {
 		result[i] = route.String()

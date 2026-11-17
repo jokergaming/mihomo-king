@@ -24,6 +24,10 @@ The dashboard shows runtime node selections and protocols, following nested
 groups to their final nodes. Rule mode lists each group's selection, global mode
 shows `GLOBAL`, and direct mode shows `DIRECT`. Press `R` to restart the managed
 core (or start it if stopped), and `r` to refresh. Status refreshes every 3 seconds.
+Opening the dashboard or pressing `r` tests the selected nodes with the configured
+test URL and displays latency in milliseconds. Shared nodes are tested once;
+background status refreshes only trigger a new test when the selection changes.
+Direct/reject routes and load-balanced groups have no single proxy latency to show.
 
 ### Interface language
 

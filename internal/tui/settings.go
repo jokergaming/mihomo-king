@@ -53,8 +53,7 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch k.String() {
 		case "esc":
-			m.screen = screenDashboard
-			return m, refreshStatusCmd(m.settings)
+			return m.switchScreen(screenDashboard)
 		case "enter":
 			return m.settingsEnter()
 		case "r":

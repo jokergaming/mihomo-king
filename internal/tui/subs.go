@@ -49,8 +49,7 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return m.activateSelectedSub()
 		case "esc":
-			m.screen = screenDashboard
-			return m, refreshStatusCmd(m.settings)
+			return m.switchScreen(screenDashboard)
 		}
 		if nm, cmd, handled := m.globalKey(k.String()); handled {
 			return nm, cmd

@@ -17,20 +17,9 @@ import (
 // it tests HTTP GET through the mixed port. Otherwise, it tests direct TCP/TLS connect.
 func (s *Settings) XrayDelay(node, testURL string, timeout time.Duration) (int, error) {
 	if s.XrayNode == node {
-		proxyURL, err := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", s.MixedPort))
+		delay, err := s.XrayActiveDelay(testURL, timeout)
 		if err == nil {
-			client := &http.Client{
-				Transport: &http.Transport{
-					Proxy: http.ProxyURL(proxyURL),
-				},
-				Timeout: timeout,
-			}
-			start := time.Now()
-			resp, err := client.Get(testURL)
-			if err == nil {
-				_ = resp.Body.Close()
-				return int(time.Since(start).Milliseconds()), nil
-			}
+			return delay, nil
 		}
 	}
 
@@ -70,6 +59,28 @@ func (s *Settings) XrayDelay(node, testURL string, timeout time.Duration) (int, 
 	}
 
 	return int(time.Since(start).Milliseconds()), nil
+}
+
+// XrayActiveDelay measures HTTP latency through the running core's proxy port.
+// Unlike XrayDelay, failures are returned without falling back to a direct dial.
+func (s *Settings) XrayActiveDelay(testURL string, timeout time.Duration) (int, error) {
+	if s.MixedPort <= 0 || s.MixedPort > 65535 {
+		return 0, fmt.Errorf("invalid Xray mixed port: %d", s.MixedPort)
+	}
+	proxyURL := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", s.MixedPort)}
+	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	defer transport.CloseIdleConnections()
+	client := &http.Client{Transport: transport, Timeout: timeout}
+	start := time.Now()
+	resp, err := client.Get(testURL)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return 0, fmt.Errorf("latency test: HTTP %s", resp.Status)
+	}
+	return max(1, int(time.Since(start).Milliseconds())), nil
 }
 
 // XrayGroupDelay tests latency of all nodes in group concurrently.

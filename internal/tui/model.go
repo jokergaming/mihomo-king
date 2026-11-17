@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -53,16 +54,18 @@ type Model struct {
 	statusErr bool
 
 	// dashboard (live state)
-	running    bool
-	pid        int
-	version    string
-	liveMode   string
-	liveTun    bool
-	capWarn    bool
-	foreignTun []string
-	liveNodes  []text
-	nodeErr    error
-	coreBusy   bool
+	running             bool
+	pid                 int
+	version             string
+	liveMode            string
+	liveTun             bool
+	capWarn             bool
+	foreignTun          []string
+	liveNodes           []dashboardNode
+	nodeErr             error
+	coreBusy            bool
+	dashboardDelayEpoch uint64
+	dashboardDelays     map[string]dashboardDelayMsg
 
 	// tun enable flow (dashboard modal)
 	tunStage   tunStage
@@ -179,7 +182,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.ResumeMsg: // back from ctrl+z: state may be stale
-		return m, refreshStatusCmd(m.settings)
+		return m.refreshDashboard()
 
 	case list.FilterMatchesMsg:
 		// A filter command can finish after a language change. Recompute from
@@ -210,10 +213,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statusMsg:
+		if m.running != msg.running || m.pid != msg.pid || !slices.EqualFunc(m.liveNodes, msg.nodes, func(a, b dashboardNode) bool {
+			return a.target == b.target && a.proxyPort == b.proxyPort && a.String() == b.String()
+		}) {
+			m.clearDashboardDelays()
+		}
 		m.running, m.pid, m.version = msg.running, msg.pid, msg.version
 		m.liveMode, m.liveTun, m.capWarn = msg.mode, msg.tun, msg.capWarn
 		m.foreignTun = msg.foreignTun
 		m.liveNodes, m.nodeErr = msg.nodes, msg.nodeErr
+		return m, m.beginDashboardDelays()
+
+	case dashboardDelayMsg:
+		if msg.epoch == m.dashboardDelayEpoch && m.dashboardDelays != nil {
+			m.dashboardDelays[msg.node] = msg
+		}
 		return m, nil
 
 	case tickMsg:
@@ -425,7 +439,7 @@ func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 	case screenSettings:
 		return m.beginAutostart(false)
 	default:
-		return m, refreshStatusCmd(m.settings)
+		return m.refreshDashboard()
 	}
 }
 
