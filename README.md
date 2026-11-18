@@ -96,7 +96,7 @@ mihomo-king chain off                 # remove the generated chain node
 tail -f "$(mihomo-king paths log)"
 ```
 
-Settings detects cores on `PATH` and preserves configured paths. If a core is missing, its first download goes to `~/.local/share/bin/<core>` for stable or `~/.local/share/bin/<core>-alpha` for alpha. Choose **core channel** in Settings while the core is stopped. Downloading the other channel leaves the running channel alone. `--channel release` remains an alias for `stable`.
+Both channels share one installation directory. For example, if Settings finds `/opt/bin/xray` on `PATH`, it installs alpha at `/opt/bin/xray-alpha`. With neither channel installed or configured, the first download uses `~/.local/bin/<core>` or `~/.local/bin/<core>-alpha`. Choose **core channel** in Settings while the core is stopped. Downloading the other channel leaves the running channel alone. `--channel release` remains an alias for `stable`.
 
 Each core defaults to its official GitHub Releases source. **Core release source** overrides the selected core for downloads and reminders. Enter a GitHub repository's releases page or an HTTPS endpoint returning the GitHub releases list in JSON. Clear it to restore the default.
 

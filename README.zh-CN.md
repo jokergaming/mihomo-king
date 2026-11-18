@@ -86,7 +86,7 @@ mihomo-king chain off                 # 删除生成的链式代理节点
 tail -f "$(mihomo-king paths log)"
 ```
 
-设置页自动探测 `PATH` 中的内核，保留已有的自定义路径。首次下载时如果找不到内核，稳定版安装到 `~/.local/share/bin/<内核名>`，Alpha 版安装到 `~/.local/share/bin/<内核名>-alpha`。停止内核后可切换「内核渠道」。下载另一渠道时，当前渠道可以继续运行。`--channel release` 仍可作为 `stable` 的别名。
+同一内核的两个渠道共用安装目录。例如，从 `PATH` 找到 `/opt/bin/xray` 后，Alpha 版安装到 `/opt/bin/xray-alpha`。两个渠道均未安装且未指定路径时，首次下载使用 `~/.local/bin/<内核名>` 或 `~/.local/bin/<内核名>-alpha`。停止内核后可切换「内核渠道」。下载另一渠道时，当前渠道可以继续运行。`--channel release` 仍可作为 `stable` 的别名。
 
 每种内核默认使用各自的官方 GitHub Releases。「内核发布地址」可为当前管理的内核设置 GitHub 仓库发布页，或返回 GitHub Releases 列表 JSON 的 HTTPS 地址。下载和更新提醒均使用该设置，清空后恢复官方源。
 
