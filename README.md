@@ -14,6 +14,7 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - Add local nodes from share links (vmess, vless, ss, trojan, hysteria2, socks5, http).
 - Switch the active subscription and reload the managed core.
 - Choose mihomo, sing-box, or Xray from the settings screen.
+- Enable **core update reminders** in Settings to check the managed core on startup and while the TUI is open. The check interval defaults to `1d` and accepts values such as `12h` or `30m`. Press `F2` to dismiss the version shown in the upper-right corner.
 - Convert Clash/mihomo subscriptions into sing-box or Xray runtime config.
 - Toggle TUN mode.
 - Switch the selected node within a proxy group.

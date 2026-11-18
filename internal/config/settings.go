@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -73,6 +75,8 @@ type Settings struct {
 
 	DashboardLatencyEnabled  bool          `yaml:"dashboard_latency_enabled"`
 	DashboardLatencyInterval time.Duration `yaml:"dashboard_latency_interval,omitempty"`
+	CoreUpdateReminders      bool          `yaml:"core_update_reminders"`
+	CoreUpdateInterval       string        `yaml:"core_update_interval,omitempty"`
 
 	appDir string // resolved at Load; not persisted
 }
@@ -84,6 +88,23 @@ const (
 )
 
 var ErrDashboardLatencyInterval = errors.New("dashboard latency interval must be at least 1s (e.g. 10s or 1m)")
+var ErrCoreUpdateInterval = errors.New("enter an interval of at least 1s (e.g. 1d, 12h or 30m)")
+
+func ParseCoreUpdateInterval(raw string) (time.Duration, error) {
+	const day = 24 * time.Hour
+	if days, ok := strings.CutSuffix(raw, "d"); ok {
+		n, err := strconv.ParseInt(days, 10, 64)
+		if err != nil || n <= 0 || n > math.MaxInt64/int64(day) {
+			return 0, ErrCoreUpdateInterval
+		}
+		return time.Duration(n) * day, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < time.Second {
+		return 0, ErrCoreUpdateInterval
+	}
+	return d, nil
+}
 
 func ValidateDashboardLatencyInterval(interval time.Duration) error {
 	if interval < time.Second {
@@ -119,6 +140,9 @@ func Load() (*Settings, error) {
 
 	s.applyDefaults()
 	if err := ValidateDashboardLatencyInterval(s.DashboardLatencyInterval); err != nil {
+		return nil, err
+	}
+	if _, err := ParseCoreUpdateInterval(s.CoreUpdateInterval); err != nil {
 		return nil, err
 	}
 	s.ensureSecret()
@@ -439,6 +463,7 @@ func defaults() *Settings {
 		TestURL:                  "http://www.gstatic.com/generate_204",
 		DashboardLatencyEnabled:  true,
 		DashboardLatencyInterval: 10 * time.Second,
+		CoreUpdateInterval:       "1d",
 	}
 }
 

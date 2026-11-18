@@ -32,14 +32,14 @@ func TestDashboardSettingsEditAndPersistence(t *testing.T) {
 	}
 	selectSetting(settingDashboardLatency)
 	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil || !m.dashboardSettingsBusy || !s.DashboardLatencyEnabled {
+	if cmd == nil || !m.settingsSaveBusy || !s.DashboardLatencyEnabled {
 		t.Fatal("toggle must save asynchronously before changing live settings")
 	}
 	if _, duplicate := press(m, tea.KeyMsg{Type: tea.KeyEnter}); duplicate != nil {
 		t.Fatal("concurrent preference save was allowed")
 	}
 	m, _ = press(m, cmd())
-	if s.DashboardLatencyEnabled || m.dashboardSettingsBusy || m.statusErr {
+	if s.DashboardLatencyEnabled || m.settingsSaveBusy || m.statusErr {
 		t.Fatalf("toggle failed: %s", m.status.String())
 	}
 	selectSetting(settingDashboardInterval)
@@ -78,7 +78,7 @@ func TestDashboardSettingsEditAndPersistence(t *testing.T) {
 	selectSetting(settingDashboardLatency)
 	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = press(m, cmd())
-	if !m.statusErr || s.DashboardLatencyEnabled || m.dashboardSettingsBusy {
+	if !m.statusErr || s.DashboardLatencyEnabled || m.settingsSaveBusy {
 		t.Fatal("failed save changed the preference or hid the error")
 	}
 	if err := os.Remove(path); err != nil {

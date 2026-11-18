@@ -20,7 +20,6 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/mihomo"
@@ -135,7 +134,8 @@ func Install(ctx context.Context, s *config.Settings, tool, channel, password st
 		}
 		return nil, err
 	}
-	res := &Result{Release: rel, Dest: dest, Version: versionLine(dest, tool)}
+	version, _ := mihomo.BinaryVersion(ctx, dest, tool)
+	res := &Result{Release: rel, Dest: dest, Version: version}
 	if err := grantNetCaps(dest, password, res); err != nil {
 		if running {
 			_ = mihomo.Start(s)
@@ -491,21 +491,6 @@ func grantNetCaps(dest, password string, res *Result) error {
 	}
 	res.Caps = true
 	return nil
-}
-
-func versionLine(bin, tool string) string {
-	arg := "-v"
-	if tool == config.ToolSingBox || tool == config.ToolXray {
-		arg = "version"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, arg).Output()
-	if err != nil {
-		return ""
-	}
-	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
-	return line
 }
 
 // Channels is the user-facing channel list.

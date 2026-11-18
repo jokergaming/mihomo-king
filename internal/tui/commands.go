@@ -63,9 +63,10 @@ type pathCompletionMsg struct {
 }
 
 type actionMsg struct {
-	note   text
-	err    error
-	notice bool
+	installedTool string
+	note          text
+	err           error
+	notice        bool
 }
 
 type coreActionMsg struct{ actionMsg }
@@ -228,9 +229,9 @@ func coreDownloadCmd(s *config.Settings, tool, channel, password string) tea.Cmd
 			if res == nil {
 				return actionMsg{err: err}
 			}
-			return actionMsg{note: coreNote(tool, res), err: err}
+			return actionMsg{note: coreNote(tool, res), err: err, installedTool: tool}
 		}
-		return actionMsg{note: coreNote(tool, res), notice: true}
+		return actionMsg{note: coreNote(tool, res), notice: true, installedTool: tool}
 	}
 }
 

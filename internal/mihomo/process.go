@@ -25,18 +25,27 @@ import (
 
 // CoreVersion queries the version of the managed binary.
 func CoreVersion(s *config.Settings) string {
-	arg := "-v"
-	if s.Tool() == config.ToolSingBox || s.Tool() == config.ToolXray {
-		arg = "version"
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, s.Binary(), arg).Output()
+	line, err := BinaryVersion(context.Background(), s.Binary(), s.Tool())
 	if err != nil {
 		return fmt.Sprintf("%s (%s: %v)", s.ToolLabel(), s.Binary(), err)
 	}
-	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
 	return line
+}
+
+// BinaryVersion returns the first line of a core's version command.
+func BinaryVersion(ctx context.Context, bin, tool string) (string, error) {
+	arg := "-v"
+	if tool == config.ToolSingBox || tool == config.ToolXray {
+		arg = "version"
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, arg).Output()
+	if err != nil {
+		return "", err
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n")
+	return line, nil
 }
 
 // Running reports whether the tracked managed process is alive, with its PID.

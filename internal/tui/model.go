@@ -13,6 +13,7 @@ import (
 
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
+	"mihomo-king/internal/core"
 	"mihomo-king/internal/subscription"
 )
 
@@ -71,7 +72,6 @@ type Model struct {
 	dashboardDelays       map[string]dashboardDelayMsg
 	dashboardDelayPending int
 	dashboardDelayNext    time.Time
-	dashboardSettingsBusy bool
 
 	// tun enable flow (dashboard modal)
 	tunStage   tunStage
@@ -109,6 +109,8 @@ type Model struct {
 	settingKey       string
 	settingInput     textinput.Model
 	coreNotice       text
+	coreUpdates      coreUpdateChecks
+	settingsSaveBusy bool
 	pendingCore      coreDownload
 	autostartEnabled bool
 	autostartLoaded  bool
@@ -171,6 +173,9 @@ func newList(title string) list.Model {
 }
 
 func (m Model) Init() tea.Cmd {
+	if m.settings.CoreUpdateReminders {
+		return tea.Batch(refreshStatusCmd(m.settings), tickCmd(), func() tea.Msg { return startCoreChecksMsg{} })
+	}
 	return tea.Batch(refreshStatusCmd(m.settings), tickCmd())
 }
 
@@ -183,6 +188,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Handled before any modal/filter so they always work.
 		switch k {
+		case "f2":
+			if m.coreUpdates.notice.Latest != "" {
+				m.coreUpdates.dismissed = m.coreUpdates.notice
+				m.coreUpdates.notice = core.Update{}
+				return m, nil
+			}
 		case "ctrl+c":
 			return m, tea.Quit
 		case "ctrl+l":
@@ -244,19 +255,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m.refreshDashboard()
 
-	case dashboardSettingsSavedMsg:
-		m.dashboardSettingsBusy = false
+	case startCoreChecksMsg:
+		cmd := m.restartCoreChecks()
+		return m, cmd
+
+	case coreUpdateCheckedMsg:
+		return m.finishCoreCheck(msg)
+
+	case preferenceSavedMsg:
+		m.settingsSaveBusy = false
 		if msg.err != nil {
 			m.setError(msg.err)
 			return m, nil
 		}
-		m.settings.DashboardLatencyEnabled = msg.enabled
-		m.settings.DashboardLatencyInterval = msg.interval
+		msg.apply(m.settings)
 		m.editingSetting = false
 		m.settingInput.Blur()
-		m.clearDashboardDelays()
 		m.reloadSettings()
 		m.setStatus("setting saved")
+		if msg.key == settingCoreInterval || msg.key == settingCoreReminders {
+			cmd := m.restartCoreChecks()
+			return m, cmd
+		}
+		m.clearDashboardDelays()
 		return m, nil
 
 	case tickMsg:
@@ -305,6 +326,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.screen == screenSubs {
 			m.reloadSubs()
+		}
+		if msg.installedTool == m.settings.Tool() {
+			cmd := m.restartCoreChecks()
+			return m, tea.Batch(refreshStatusCmd(m.settings), cmd)
 		}
 		return m, refreshStatusCmd(m.settings)
 
@@ -518,16 +543,18 @@ func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
+	var page string
 	switch m.screen {
 	case screenSubs:
-		return m.viewScreen(m.viewSubs())
+		page = m.viewScreen(m.viewSubs())
 	case screenNodes:
-		return m.viewScreen(m.viewNodes())
+		page = m.viewScreen(m.viewNodes())
 	case screenSettings:
-		return m.viewScreen(m.viewSettings())
+		page = m.viewScreen(m.viewSettings())
 	default:
-		return m.dashboardViewport().View()
+		page = m.dashboardViewport().View()
 	}
+	return m.withCoreUpdateNotice(page)
 }
 
 func (m Model) viewScreen(body string) string {

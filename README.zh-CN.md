@@ -13,6 +13,7 @@
 - 从分享链接添加本地节点（vmess、vless、ss、trojan、hysteria2、socks5、http）。
 - 切换当前订阅并重新加载代理核心。
 - 在设置页选择管理 mihomo、sing-box 或 Xray。
+- 在设置页开启「内核更新提醒」后，TUI 会在启动时检查当前管理的内核，并在运行期间定时检查。检查间隔默认 `1d`，也可填写 `12h`、`30m` 等。发现更新时，按 `F2` 可关闭右上角的版本提醒。
 - 将 Clash/mihomo 订阅转换为 sing-box 或 Xray 运行配置。
 - 开启或关闭 TUN 模式。
 - 在策略组中切换节点。

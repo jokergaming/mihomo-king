@@ -25,6 +25,8 @@ const (
 	settingSingBoxBin        = "sing_box_bin"
 	settingXrayBin           = "xray_bin"
 	settingCoreGet           = "core_download"
+	settingCoreReminders     = "core_update_reminders"
+	settingCoreInterval      = "core_update_interval"
 	settingGeoGet            = "geo_download"
 	settingController        = "controller"
 	settingMixedPort         = "mixed_port"
@@ -39,7 +41,7 @@ const (
 )
 
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.dashboardSettingsBusy {
+	if m.settingsSaveBusy {
 		return m, nil
 	}
 	if m.tunStage == tunAskCoreCaps {
@@ -89,7 +91,12 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 		return m.beginAutostart(true)
 	}
 	if sel.id == settingDashboardLatency {
-		return m.saveDashboardSettings(!m.settings.DashboardLatencyEnabled, m.settings.DashboardLatencyInterval)
+		enabled := !m.settings.DashboardLatencyEnabled
+		return m.savePreference(sel.id, func(s *config.Settings) { s.DashboardLatencyEnabled = enabled })
+	}
+	if sel.id == settingCoreReminders {
+		enabled := !m.settings.CoreUpdateReminders
+		return m.savePreference(sel.id, func(s *config.Settings) { s.CoreUpdateReminders = enabled })
 	}
 	if sel.id == settingTool {
 		if m.running {
@@ -111,7 +118,8 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 		}
 		m.reloadSettings()
 		m.setStatus("managing %s", m.settings.ToolLabel())
-		return m, refreshStatusCmd(m.settings)
+		cmd := m.restartCoreChecks()
+		return m, tea.Batch(refreshStatusCmd(m.settings), cmd)
 	}
 	m.editingSetting = true
 	m.settingKey = sel.id
@@ -136,7 +144,15 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.setError(config.ErrDashboardLatencyInterval)
 					return m, nil
 				}
-				return m.saveDashboardSettings(m.settings.DashboardLatencyEnabled, interval)
+				return m.savePreference(m.settingKey, func(s *config.Settings) { s.DashboardLatencyInterval = interval })
+			}
+			if m.settingKey == settingCoreInterval {
+				raw := strings.TrimSpace(m.settingInput.Value())
+				if _, err := config.ParseCoreUpdateInterval(raw); err != nil {
+					m.setError(err)
+					return m, nil
+				}
+				return m.savePreference(m.settingKey, func(s *config.Settings) { s.CoreUpdateInterval = raw })
 			}
 			if m.settingKey == settingCoreGet {
 				tool, channel, err := parseCoreDownload(m.settingInput.Value())
@@ -159,6 +175,7 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setStatus("downloading shared geoip…")
 				return m, geoDownloadCmd(m.settings, tools)
 			}
+			oldBin := m.settings.Binary()
 			if err := m.saveSettingValue(m.settingKey, strings.TrimSpace(m.settingInput.Value())); err != nil {
 				m.setError(err)
 				return m, nil
@@ -167,6 +184,10 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.settingInput.Blur()
 			m.reloadSettings()
 			m.setStatus("setting saved")
+			if oldBin != m.settings.Binary() {
+				cmd := m.restartCoreChecks()
+				return m, tea.Batch(refreshStatusCmd(m.settings), cmd)
+			}
 			return m, refreshStatusCmd(m.settings)
 		case "tab":
 			if options := m.settingOptions(m.settingKey); len(options) > 0 {
@@ -183,6 +204,8 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) settingValue(key string) string {
 	switch key {
+	case settingCoreInterval:
+		return m.settings.CoreUpdateInterval
 	case settingMihomoBin:
 		return m.settings.MihomoBin
 	case settingSingBoxBin:
@@ -261,6 +284,12 @@ func (m *Model) saveSettingValue(key, raw string) error {
 func (m *Model) reloadSettings() {
 	rows := []list.Item{
 		item{title: m.tr("download core"), desc: m.tr("release or alpha · replaces the configured binary · tab to choose"), id: settingCoreGet},
+		item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders},
+	}
+	if m.settings.CoreUpdateReminders {
+		rows = append(rows, item{title: m.tr("core update check interval"), desc: m.settingValue(settingCoreInterval), id: settingCoreInterval})
+	}
+	rows = append(rows,
 		item{title: m.tr("download geoip"), desc: m.geoStatus(m.settings), id: settingGeoGet},
 		item{title: m.tr("managed tool"), desc: m.settings.ToolLabel() + m.tr("  ·  options: mihomo, sing-box, xray  ·  enter to toggle"), id: settingTool},
 		item{title: m.tr("autostart"), desc: m.autostartDescription(), id: settingAutostart},
@@ -276,9 +305,13 @@ func (m *Model) reloadSettings() {
 		item{title: m.tr("latency refresh interval"), desc: m.settings.DashboardLatencyInterval.String(), id: settingDashboardInterval},
 		item{title: m.tr("mode"), desc: m.optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
 		item{title: m.tr("log level"), desc: m.optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
-	}
+	)
 	m.settingsList.Title = m.tr("Settings")
+	previous := m.settingsList
 	m.settingsList.SetItems(rows)
+	if previous.FilterState() != list.Unfiltered {
+		restoreListState(&m.settingsList, previous)
+	}
 }
 
 func (m Model) viewSettings() string {
@@ -319,6 +352,8 @@ func (m Model) optionDesc(current string, options []string) string {
 
 func (m Model) settingPrompt(key string) string {
 	switch key {
+	case settingCoreInterval:
+		return m.tr("core update check interval (e.g. 1d, 12h or 30m)")
 	case settingDashboardInterval:
 		return m.tr("latency refresh interval (e.g. 10s or 1m, minimum 1s)")
 	case settingCoreGet:
@@ -332,20 +367,19 @@ func (m Model) settingPrompt(key string) string {
 	return m.settingLabel(key)
 }
 
-type dashboardSettingsSavedMsg struct {
-	enabled  bool
-	interval time.Duration
-	err      error
+type preferenceSavedMsg struct {
+	key   string
+	apply func(*config.Settings)
+	err   error
 }
 
-func (m Model) saveDashboardSettings(enabled bool, interval time.Duration) (Model, tea.Cmd) {
+func (m Model) savePreference(key string, apply func(*config.Settings)) (Model, tea.Cmd) {
 	s := *m.settings
-	s.DashboardLatencyEnabled = enabled
-	s.DashboardLatencyInterval = interval
-	m.dashboardSettingsBusy = true
-	m.setStatus("saving %s…", message("dashboard latency"))
+	apply(&s)
+	m.settingsSaveBusy = true
+	m.setStatus("saving settings…")
 	return m, func() tea.Msg {
-		return dashboardSettingsSavedMsg{enabled: enabled, interval: interval, err: s.Save()}
+		return preferenceSavedMsg{key: key, apply: apply, err: s.Save()}
 	}
 }
 
