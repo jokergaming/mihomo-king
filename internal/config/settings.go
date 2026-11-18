@@ -77,6 +77,7 @@ type Settings struct {
 	CoreUpdateReminders      bool              `yaml:"core_update_reminders"`
 	CoreUpdateInterval       string            `yaml:"core_update_interval,omitempty"`
 	CoreBackupCount          int               `yaml:"core_backup_count"`
+	CoreBackupRoot           string            `yaml:"core_backup_root,omitempty"`
 	CoreChannels             map[string]string `yaml:"core_channels,omitempty"`
 	AlphaBinaries            map[string]string `yaml:"alpha_binaries,omitempty"`
 	CoreReleaseURLs          map[string]string `yaml:"core_release_urls,omitempty"`

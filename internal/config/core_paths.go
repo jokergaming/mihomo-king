@@ -74,6 +74,10 @@ func (s *Settings) resolveCorePaths() error {
 	if err != nil {
 		return err
 	}
+	s.CoreBackupRoot, err = ResolveCoreBackupRoot(s.CoreBackupRoot)
+	if err != nil {
+		return err
+	}
 	if s.CoreBackupCount < 0 {
 		return fmt.Errorf("core backup count must be non-negative")
 	}
@@ -133,4 +137,22 @@ func (s *Settings) resolveCorePaths() error {
 		s.AlphaBinaries = WithCoreValue(s.AlphaBinaries, tool, alpha)
 	}
 	return nil
+}
+
+func ResolveCoreBackupRoot(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if raw == "~" || strings.HasPrefix(raw, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		raw = filepath.Join(home, raw[1:])
+	}
+	if !filepath.IsAbs(raw) {
+		return "", fmt.Errorf("enter an absolute backup path or a path starting with ~/")
+	}
+	return filepath.Clean(raw), nil
 }

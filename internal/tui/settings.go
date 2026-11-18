@@ -16,6 +16,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/core"
@@ -31,6 +32,7 @@ const (
 	settingCoreGet           = "core_download"
 	settingCoreRestore       = "core_restore"
 	settingCoreBackups       = "core_backup_count"
+	settingBackupRoot        = "core_backup_root"
 	settingCoreChannel       = "core_channel"
 	settingCoreSource        = "core_release_url"
 	settingCoreReminders     = "core_update_reminders"
@@ -172,6 +174,22 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			switch m.settingKey {
+			case settingBackupRoot:
+				root, err := config.ResolveCoreBackupRoot(m.settingInput.Value())
+				if err != nil {
+					m.setErr("enter an absolute backup path or a path starting with ~/")
+					return m, nil
+				}
+				if root != "" {
+					if info, err := os.Stat(root); err == nil && !info.IsDir() {
+						m.setErr("backup path is not a directory")
+						return m, nil
+					} else if err != nil && !os.IsNotExist(err) {
+						m.setError(err)
+						return m, nil
+					}
+				}
+				return m.savePreference(m.settingKey, func(s *config.Settings) { s.CoreBackupRoot = root })
 			case settingCoreBackups:
 				count, err := strconv.Atoi(strings.TrimSpace(m.settingInput.Value()))
 				if err != nil || count < 0 {
@@ -267,6 +285,8 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) settingValue(key string) string {
 	switch key {
+	case settingBackupRoot:
+		return m.settings.CoreBackupRoot
 	case settingCoreBackups:
 		return strconv.Itoa(m.settings.CoreBackupCount)
 	case settingCoreSource:
@@ -351,6 +371,10 @@ func (m *Model) saveSettingValue(key, raw string) error {
 func (m *Model) reloadSettings() {
 	tool := m.settings.Tool()
 	spec, _ := core.SpecFor(tool)
+	dir, err := core.BackupDir(m.settings, tool, m.settings.Channel(tool))
+	if err != nil {
+		dir = err.Error()
+	}
 	rows := []list.Item{
 		item{title: m.tr("download core"), desc: m.tr("stable or alpha · replaces the configured binary · tab to choose"), id: settingCoreGet},
 		item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders},
@@ -360,7 +384,8 @@ func (m *Model) reloadSettings() {
 	}
 	rows = append(rows,
 		item{title: m.tr("core channel"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreChannel},
-		item{title: m.tr("restore core backup"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreRestore},
+		item{title: m.tr("restore core backup"), desc: dir, id: settingCoreRestore},
+		item{title: m.tr("core backup root"), desc: cmp.Or(m.settings.CoreBackupRoot, m.tr("beside the core binary")), id: settingBackupRoot},
 		item{title: m.tr("backups to keep per channel"), desc: m.settingValue(settingCoreBackups), id: settingCoreBackups},
 		item{title: m.tr("core release source"), desc: cmp.Or(m.settingValue(settingCoreSource), "https://github.com/"+spec.Repo+"/releases"), id: settingCoreSource},
 		item{title: m.tr("download geoip"), desc: m.geoStatus(m.settings), id: settingGeoGet},
@@ -389,6 +414,12 @@ func (m *Model) reloadSettings() {
 
 func (m Model) viewSettings() string {
 	body := m.listView(m.settingsList)
+	if row, ok := m.settingsList.SelectedItem().(item); ok && (row.id == settingCoreRestore || row.id == settingBackupRoot) {
+		width := max(1, m.width-4)
+		if ansi.StringWidth(row.desc) > width-2 {
+			body += "\n" + ansi.Hardwrap(row.desc, width, false)
+		}
+	}
 	if m.coreNotice.key != "" {
 		body += "\n\n" + okStyle.Render(m.render(m.coreNotice))
 	}
@@ -427,6 +458,8 @@ func (m Model) optionDesc(current string, options []string) string {
 
 func (m Model) settingPrompt(key string) string {
 	switch key {
+	case settingBackupRoot:
+		return m.tr("backup root (empty for default)")
 	case settingCoreSource:
 		return m.tr("GitHub releases URL (empty for official source)")
 	case settingCoreRestore:

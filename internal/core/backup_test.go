@@ -50,6 +50,44 @@ func TestBackupRetentionAndRestore(t *testing.T) {
 	}
 }
 
+func TestCustomBackupRootAcrossFilesystems(t *testing.T) {
+	root, err := os.MkdirTemp("/dev/shm", "mihomo-king-backup-test-")
+	if err != nil {
+		t.Skip("no writable /dev/shm")
+	}
+	t.Cleanup(func() { os.RemoveAll(root) })
+	s := &config.Settings{MihomoBin: filepath.Join(t.TempDir(), "mihomo"), CoreBackupCount: 2}
+	install := func(version string) {
+		t.Helper()
+		_, err := changeBinary(t.Context(), s, "mihomo", "stable", true, func(stage string, _ *Result) error {
+			return os.WriteFile(stage, []byte("#!/bin/sh\necho "+version+"\n"), 0700)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	install("first")
+	install("second")
+	s.CoreBackupRoot = root
+	install("third")
+	names, err := Backups(s, "mihomo", "stable")
+	if err != nil || len(names) != 1 {
+		t.Fatalf("custom backups: %v %v", names, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "mihomo", "stable", "mihomo", names[0])); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Restore(t.Context(), s, "mihomo", "stable", names[0], true)
+	if err != nil || res.Version != "second" {
+		t.Fatalf("custom restore: %+v %v", res, err)
+	}
+	s.CoreBackupRoot = ""
+	res, err = Restore(t.Context(), s, "mihomo", "stable", "", true)
+	if err != nil || res.Version != "first" {
+		t.Fatalf("original backup: %+v %v", res, err)
+	}
+}
+
 // The isolated child doubles as a core with a controller readiness endpoint.
 func TestMain(m *testing.M) {
 	if addr := os.Getenv("MIHOMO_KING_TEST_CONTROLLER"); addr != "" && len(os.Args) > 1 {

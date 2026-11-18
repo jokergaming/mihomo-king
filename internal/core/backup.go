@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"syscall"
 	"time"
@@ -51,8 +52,19 @@ func installPath(s *config.Settings, tool, channel string) (string, error) {
 	return "", err
 }
 
-func backupDir(dest, tool, channel string) string {
-	return filepath.Join(filepath.Dir(dest), ".mihomo-king-backups", tool, CanonicalChannel(channel), filepath.Base(dest))
+func backupDir(root, dest, tool, channel string) string {
+	if root == "" {
+		root = filepath.Join(filepath.Dir(dest), ".mihomo-king-backups")
+	}
+	return filepath.Join(root, tool, CanonicalChannel(channel), filepath.Base(dest))
+}
+
+func BackupDir(s *config.Settings, tool, channel string) (string, error) {
+	dest, err := installPath(s, tool, channel)
+	if err != nil {
+		return "", err
+	}
+	return backupDir(s.CoreBackupRoot, dest, tool, channel), nil
 }
 
 func backupNames(dir string) ([]string, error) {
@@ -74,18 +86,17 @@ func backupNames(dir string) ([]string, error) {
 }
 
 func Backups(s *config.Settings, tool, channel string) ([]string, error) {
-	dest, err := installPath(s, tool, channel)
+	dir, err := BackupDir(s, tool, channel)
 	if err != nil {
 		return nil, err
 	}
-	return backupNames(backupDir(dest, tool, channel))
+	return backupNames(dir)
 }
 
-// Restore uses the backup inode so the previous executable's mode and Linux
-// capabilities survive recovery, including on machines without network access.
+// Restore stages the selected backup locally before replacing the executable.
 func Restore(ctx context.Context, s *config.Settings, tool, channel, name string, restart bool) (*Result, error) {
 	return changeBinary(ctx, s, tool, channel, restart, func(stage string, res *Result) error {
-		dir := backupDir(res.Dest, tool, channel)
+		dir := backupDir(s.CoreBackupRoot, res.Dest, tool, channel)
 		names, err := backupNames(dir)
 		if err != nil {
 			return err
@@ -97,7 +108,7 @@ func Restore(ctx context.Context, s *config.Settings, tool, channel, name string
 			return fmt.Errorf("no matching %s %s backup: %q", tool, channel, name)
 		}
 		res.Backup = name
-		return os.Link(filepath.Join(dir, name), stage)
+		return linkOrCopy(ctx, filepath.Join(dir, name), stage)
 	})
 }
 
@@ -117,11 +128,15 @@ func changeBinary(ctx context.Context, s *config.Settings, tool, channel string,
 	if s.CoreBackupCount < 0 {
 		return nil, fmt.Errorf("core backup count must be non-negative")
 	}
-	dir := backupDir(dest, tool, channel)
+	dir := backupDir(s.CoreBackupRoot, dest, tool, channel)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
-	lock, err := os.Open(dir)
+	// Lock at the install location even when concurrent callers use different backup roots.
+	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
+		return nil, err
+	}
+	lock, err := os.Open(filepath.Dir(dest))
 	if err != nil {
 		return nil, err
 	}
@@ -158,12 +173,15 @@ func changeBinary(ctx context.Context, s *config.Settings, tool, channel string,
 		}
 	}
 	// Even with zero retained backups keep the old inode until restart succeeds.
+	previous := filepath.Join(tmp, "previous")
 	backup := filepath.Join(dir, time.Now().UTC().Format(backupFormat))
-	if err := os.Link(dest, backup); err != nil {
+	if err := os.Link(dest, previous); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("back up %s: %w", dest, err)
 		}
 		backup = ""
+	} else if err := linkOrCopy(ctx, previous, backup); err != nil {
+		return nil, fmt.Errorf("back up %s to %s: %w", dest, backup, err)
 	}
 	if running {
 		if err := mihomo.Stop(s); err != nil {
@@ -184,13 +202,13 @@ func changeBinary(ctx context.Context, s *config.Settings, tool, channel string,
 			if backup == "" {
 				return nil, err
 			}
-			if restoreErr := os.Rename(backup, dest); restoreErr != nil {
+			if restoreErr := os.Rename(previous, dest); restoreErr != nil {
 				return nil, errors.Join(err, fmt.Errorf("rollback from %s: %w", backup, restoreErr))
 			}
 			if startErr := start(); startErr != nil {
 				return nil, errors.Join(err, fmt.Errorf("previous binary restored but restart failed: %w", startErr))
 			}
-			return nil, fmt.Errorf("update failed; previous binary restored and restarted: %w", err)
+			return nil, errors.Join(fmt.Errorf("update failed; previous binary restored and restarted: %w", err), os.Remove(backup))
 		}
 		res.Restarted = true
 	}
@@ -205,4 +223,25 @@ func changeBinary(ctx context.Context, s *config.Settings, tool, channel string,
 		}
 	}
 	return res, nil
+}
+
+// Publish a complete copy when the backup volume cannot share the source inode.
+func linkOrCopy(ctx context.Context, src, dst string) error {
+	if err := os.Link(src, dst); !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	tmp, err := os.MkdirTemp(filepath.Dir(dst), ".backup-copy-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	copyPath := filepath.Join(tmp, "binary")
+	preserve := "-p"
+	if runtime.GOOS == "linux" {
+		preserve = "--preserve=mode,xattr"
+	}
+	if output, err := exec.CommandContext(ctx, "cp", preserve, src, copyPath).CombinedOutput(); err != nil {
+		return fmt.Errorf("copy executable and attributes: %w: %s", err, output)
+	}
+	return os.Rename(copyPath, dst)
 }

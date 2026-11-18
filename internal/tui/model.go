@@ -278,7 +278,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case settingCoreInterval, settingCoreReminders, settingCoreSource, settingCoreChannel:
 			cmd := m.restartCoreChecks()
 			return m, cmd
-		case settingCoreBackups:
+		case settingCoreBackups, settingBackupRoot:
 			return m, nil
 		}
 		m.clearDashboardDelays()
