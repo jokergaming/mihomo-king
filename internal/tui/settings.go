@@ -64,10 +64,6 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.settingsEnter()
 		case "r":
 			return m.beginAutostart(false)
-		case "g":
-			return m.beginCoreDownload()
-		case "G":
-			return m.beginGeoDownload()
 		}
 		if nm, cmd, handled := m.globalKey(k.String()); handled {
 			return nm, cmd

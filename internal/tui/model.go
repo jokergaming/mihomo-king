@@ -53,6 +53,7 @@ type Model struct {
 	height    int
 	status    text // transient status / error line
 	statusErr bool
+	gPending  bool
 
 	// dashboard (live state)
 	running               bool
@@ -64,6 +65,7 @@ type Model struct {
 	foreignTun            []string
 	liveNodes             []dashboardNode
 	nodeErr               error
+	dashboardOffset       int
 	coreBusy              bool
 	dashboardDelayEpoch   uint64
 	dashboardDelays       map[string]dashboardDelayMsg
@@ -175,8 +177,12 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		k := msg.String()
+		if k != "g" {
+			m.gPending = false
+		}
 		// Handled before any modal/filter so they always work.
-		switch msg.String() {
+		switch k {
 		case "ctrl+c":
 			return m, tea.Quit
 		case "ctrl+l":
@@ -191,16 +197,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case list.FilterMatchesMsg:
 		// A filter command can finish after a language change. Recompute from
 		// current rows so its old item text cannot restore the previous language.
-		var current *list.Model
-		switch m.screen {
-		case screenSubs:
-			current = &m.subs
-		case screenNodes:
-			current = &m.nodes
-		case screenSettings:
-			current = &m.settingsList
-		}
-		if current != nil && current.FilterState() != list.Unfiltered {
+		if current := m.activeList(); current != nil && current.FilterState() != list.Unfiltered {
 			restoreListState(current, *current)
 		}
 		return m, nil
@@ -429,9 +426,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// globalKey handles keys common to every screen (quit, screen switching).
+// globalKey handles shared navigation after the active screen's input handlers.
 func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 	switch k {
+	case "g":
+		if !m.gPending {
+			m.gPending = true
+			return m, nil, true
+		}
+		fallthrough
+	case "gg", "G":
+		m.gPending = false
+		m.jumpToEdge(k == "G")
+		return m, nil, true
 	case "q":
 		return m, tea.Quit, true
 	case "tab":
@@ -456,12 +463,44 @@ func (m Model) globalKey(k string) (Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
+func (m *Model) activeList() *list.Model {
+	switch m.screen {
+	case screenSubs:
+		return &m.subs
+	case screenNodes:
+		return &m.nodes
+	case screenSettings:
+		return &m.settingsList
+	}
+	return nil
+}
+
+func (m *Model) jumpToEdge(bottom bool) {
+	if l := m.activeList(); l != nil {
+		if bottom {
+			l.GoToEnd()
+		} else {
+			l.GoToStart()
+		}
+		return
+	}
+	if bottom {
+		v := m.dashboardViewport()
+		v.GotoBottom()
+		m.dashboardOffset = v.YOffset
+	} else {
+		m.dashboardOffset = 0
+	}
+}
+
 // switchScreen activates a screen and kicks off its data refresh.
 func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 	if m.screen == screenDashboard && s != screenDashboard {
 		m.clearDashboardDelays()
 	}
 	m.screen = s
+	m.gPending = false
+	m.jumpToEdge(false)
 	if s != screenNodes {
 		m.chainEntry = ""
 	}
@@ -479,22 +518,20 @@ func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 }
 
 func (m Model) View() string {
-	var b strings.Builder
-	b.WriteString(m.header())
-	b.WriteString("\n\n")
 	switch m.screen {
 	case screenSubs:
-		b.WriteString(m.viewSubs())
+		return m.viewScreen(m.viewSubs())
 	case screenNodes:
-		b.WriteString(m.viewNodes())
+		return m.viewScreen(m.viewNodes())
 	case screenSettings:
-		b.WriteString(m.viewSettings())
+		return m.viewScreen(m.viewSettings())
 	default:
-		b.WriteString(m.viewDashboard())
+		return m.dashboardViewport().View()
 	}
-	b.WriteString("\n\n")
-	b.WriteString(m.footer())
-	return appStyle.Render(b.String())
+}
+
+func (m Model) viewScreen(body string) string {
+	return appStyle.Render(m.header() + "\n\n" + body + "\n\n" + m.footer())
 }
 
 func (m Model) header() string {
@@ -569,7 +606,7 @@ func (m Model) screenHelp() string {
 		if m.settingsList.FilterState() == list.Filtering {
 			return m.tr("type to filter · enter apply · esc cancel")
 		}
-		return m.tr("enter edit/download · g download core · G download geoip · r refresh · / filter · tab/1/2/3/4 switch · q quit")
+		return m.tr("enter edit/download · r refresh · / filter · tab/1/2/3/4 switch · q quit")
 	default:
 		switch m.tunStage {
 		case tunAskForeign:

@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"mihomo-king/internal/mihomo"
 )
@@ -54,6 +56,11 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.setStatus("refreshing…")
 		return m.refreshDashboard()
+	case "j", "down", "k", "up", "pgup", "pgdown":
+		v := m.dashboardViewport()
+		v, _ = v.Update(k)
+		m.dashboardOffset = v.YOffset
+		return m, nil
 	}
 	if nm, cmd, handled := m.globalKey(k.String()); handled {
 		return nm, cmd
@@ -130,6 +137,25 @@ func (m Model) updateTunPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m Model) dashboardViewport() viewport.Model {
+	page := m.viewScreen(strings.TrimSuffix(m.viewDashboard(), "\n"))
+	width, height := lipgloss.Size(page)
+	if m.width > 0 {
+		width = min(width, m.width)
+	}
+	if m.height > 0 {
+		height = min(height, m.height)
+	}
+	v := viewport.New(width, height)
+	v.SetContent(page)
+	if m.tunStage != tunIdle {
+		v.GotoBottom()
+	} else {
+		v.SetYOffset(m.dashboardOffset)
+	}
+	return v
 }
 
 func (m Model) viewDashboard() string {
