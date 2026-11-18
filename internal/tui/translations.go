@@ -1,7 +1,10 @@
 package tui
 
+import "mihomo-king/internal/core"
+
 // English templates are stable keys; arguments keep user content untranslated.
 var chinese = map[string]string{
+	core.MissingGitHubCLIMessage:                      "GitHub API 请求已达限额，PATH 中找不到 GitHub CLI（gh）。\n请前往 https://cli.github.com/ 下载安装 GitHub CLI。\n安装后运行 gh auth login --hostname github.com 登录，然后重试。\n%v",
 	"core channel":                                    "内核渠道",
 	"restore core backup":                             "恢复内核备份",
 	"restored %s backup %s at %s":                     "已恢复 %s 备份 %s 到 %s",

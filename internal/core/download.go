@@ -16,11 +16,14 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/mihomo"
@@ -35,6 +38,13 @@ const (
 
 // githubAPI is the GitHub releases endpoint. Tests replace it.
 var githubAPI = "https://api.github.com"
+
+const MissingGitHubCLIMessage = "GitHub API rate limit reached. GitHub CLI (gh) was not found on PATH.\nDownload GitHub CLI from https://cli.github.com/\nAfter installing, run gh auth login --hostname github.com and retry.\n%v"
+
+type MissingGitHubCLIError struct{ Cause error }
+
+func (e *MissingGitHubCLIError) Error() string { return fmt.Sprintf(MissingGitHubCLIMessage, e.Cause) }
+func (e *MissingGitHubCLIError) Unwrap() error { return e.Cause }
 
 // Spec describes one managed core's GitHub releases.
 type Spec struct {
@@ -212,13 +222,45 @@ func fetchReleases(ctx context.Context, spec Spec) ([]githubRelease, error) {
 		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list %s releases: %s", repo, resp.Status)
+		var detail struct{ Message string }
+		_ = json.Unmarshal(body, &detail)
+		failure := fmt.Errorf("list %s releases: %s", repo, resp.Status)
+		if detail.Message != "" {
+			failure = fmt.Errorf("%w: %s", failure, detail.Message)
+		}
+		if !githubQuotaExhausted(req.URL, resp) {
+			return nil, failure
+		}
+		// gh handles its own credentials. Only pass official release-list paths.
+		cmd := exec.CommandContext(ctx, "gh", "api", "--hostname", "github.com", req.URL.RequestURI())
+		body, err = cmd.Output()
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			if reset, parseErr := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); parseErr == nil {
+				failure = fmt.Errorf("%w (resets %s)", failure, time.Unix(reset, 0).Local().Format(time.RFC3339))
+			}
+			if errors.Is(err, exec.ErrNotFound) {
+				return nil, &MissingGitHubCLIError{Cause: failure}
+			}
+			return nil, fmt.Errorf("%w; authenticated retry failed (%v). Check gh auth status --hostname github.com", failure, err)
+		}
 	}
 	var releases []githubRelease
 	if err := json.Unmarshal(body, &releases); err != nil {
 		return nil, fmt.Errorf("parse %s releases: %w", repo, err)
 	}
 	return releases, nil
+}
+
+var releaseListPath = regexp.MustCompile(`^/repos/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+/releases$`)
+
+func githubQuotaExhausted(u *url.URL, resp *http.Response) bool {
+	return (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests) &&
+		resp.Header.Get("X-RateLimit-Remaining") == "0" &&
+		u.Scheme == "https" && u.Host == "api.github.com" && u.User == nil &&
+		releaseListPath.MatchString(u.EscapedPath()) && path.Clean(u.Path) == u.Path
 }
 
 func pickRelease(releases []githubRelease, spec Spec, channel string) (githubRelease, error) {

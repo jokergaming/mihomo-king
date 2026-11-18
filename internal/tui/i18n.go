@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mihomo-king/internal/config"
+	"mihomo-king/internal/core"
 	"mihomo-king/internal/mihomo"
 )
 
@@ -155,6 +156,9 @@ func errorText(err error) text {
 	// Match direct UI messages only; unwrapping could discard backend context.
 	if t, ok := err.(text); ok {
 		return t
+	}
+	if missing, ok := err.(*core.MissingGitHubCLIError); ok {
+		return message(core.MissingGitHubCLIMessage, missing.Cause)
 	}
 	switch err {
 	case mihomo.ErrDarwinTunPrivileges, config.ErrInvalidTunDevice, config.ErrDashboardLatencyInterval, config.ErrCoreUpdateInterval:

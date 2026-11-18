@@ -30,6 +30,16 @@ func TestTunErrorLocalizationPreservesExternalErrors(t *testing.T) {
 	}
 }
 
+func TestMissingGHGuidanceInChinese(t *testing.T) {
+	err := &core.MissingGitHubCLIError{Cause: errors.New("403 Forbidden")}
+	got := errorText(err).render(config.LanguageChinese)
+	for _, want := range []string{"下载安装", "https://cli.github.com/", "gh auth login --hostname github.com", "403 Forbidden"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("message missing %q: %s", want, got)
+		}
+	}
+}
+
 func switchLanguage(t *testing.T, m Model) Model {
 	t.Helper()
 	m, cmd := press(m, tea.KeyMsg{Type: tea.KeyCtrlL})

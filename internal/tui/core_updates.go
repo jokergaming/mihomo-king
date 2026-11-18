@@ -65,7 +65,7 @@ func (m Model) finishCoreCheck(msg coreUpdateCheckedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 	if msg.err != nil {
-		m.setErr("core update check failed: %v", msg.err)
+		m.setErr("core update check failed: %v", errorText(msg.err))
 	} else if msg.update != m.coreUpdates.dismissed {
 		m.coreUpdates.notice = msg.update
 	} else {
