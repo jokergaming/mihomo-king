@@ -217,13 +217,10 @@ func fetchReleases(ctx context.Context, spec Spec) ([]githubRelease, error) {
 		return nil, fmt.Errorf("list %s releases: %w", repo, err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if err != nil {
-		return nil, err
-	}
+	var source io.Reader = resp.Body
 	if resp.StatusCode != http.StatusOK {
 		var detail struct{ Message string }
-		_ = json.Unmarshal(body, &detail)
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&detail)
 		failure := fmt.Errorf("list %s releases: %s", repo, resp.Status)
 		if detail.Message != "" {
 			failure = fmt.Errorf("%w: %s", failure, detail.Message)
@@ -233,7 +230,7 @@ func fetchReleases(ctx context.Context, spec Spec) ([]githubRelease, error) {
 		}
 		// gh handles its own credentials. Only pass official release-list paths.
 		cmd := exec.CommandContext(ctx, "gh", "api", "--hostname", "github.com", req.URL.RequestURI())
-		body, err = cmd.Output()
+		body, err := cmd.Output()
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
@@ -246,10 +243,46 @@ func fetchReleases(ctx context.Context, spec Spec) ([]githubRelease, error) {
 			}
 			return nil, fmt.Errorf("%w; authenticated retry failed (%v). Check gh auth status --hostname github.com", failure, err)
 		}
+		source = bytes.NewReader(body)
+	}
+	const maxReleasePage = 64 << 20
+	page := &io.LimitedReader{R: source, N: maxReleasePage + 1}
+	releases, err := decodeReleasePage(page)
+	if page.N == 0 {
+		return nil, fmt.Errorf("list %s releases: response exceeds %d MiB", repo, maxReleasePage>>20)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("parse %s releases: %w", repo, err)
+	}
+	return releases, nil
+}
+
+// Decode one release at a time so large asset lists don't buffer the whole page.
+func decodeReleasePage(r io.Reader) ([]githubRelease, error) {
+	dec := json.NewDecoder(r)
+	token, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if token != json.Delim('[') {
+		return nil, errors.New("expected a release array")
 	}
 	var releases []githubRelease
-	if err := json.Unmarshal(body, &releases); err != nil {
-		return nil, fmt.Errorf("parse %s releases: %w", repo, err)
+	for dec.More() {
+		var rel githubRelease
+		if err := dec.Decode(&rel); err != nil {
+			return nil, err
+		}
+		releases = append(releases, rel)
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New("unexpected data after release array")
 	}
 	return releases, nil
 }
