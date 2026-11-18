@@ -112,6 +112,7 @@ type Model struct {
 	coreUpdates      coreUpdateChecks
 	settingsSaveBusy bool
 	pendingCore      coreDownload
+	backups          []string
 	autostartEnabled bool
 	autostartLoaded  bool
 	autostartBusy    bool
@@ -273,9 +274,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.settingInput.Blur()
 		m.reloadSettings()
 		m.setStatus("setting saved")
-		if msg.key == settingCoreInterval || msg.key == settingCoreReminders {
+		switch msg.key {
+		case settingCoreInterval, settingCoreReminders, settingCoreSource, settingCoreChannel:
 			cmd := m.restartCoreChecks()
 			return m, cmd
+		case settingCoreBackups:
+			return m, nil
 		}
 		m.clearDashboardDelays()
 		return m, nil
@@ -286,6 +290,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case coreActionMsg:
 		m.coreBusy = false
 		return m.Update(msg.actionMsg)
+
+	case backupsMsg:
+		m.coreBusy = false
+		if msg.err != nil {
+			m.setError(msg.err)
+			return m, nil
+		}
+		if len(msg.names) == 0 {
+			m.setStatus("no backups for this channel")
+			return m, nil
+		}
+		m.backups = msg.names
+		m.settingKey = settingCoreRestore
+		m.editingSetting = true
+		m.settingInput.SetValue(msg.names[0])
+		m.settingInput.CursorEnd()
+		return m, m.settingInput.Focus()
 
 	case languageSavedMsg:
 		m.languageBusy = false

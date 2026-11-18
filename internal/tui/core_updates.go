@@ -41,6 +41,7 @@ func (m *Model) scheduleCoreCheck(delay time.Duration) tea.Cmd {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.coreUpdates.cancel = cancel
 	generation, tool, bin := m.coreUpdates.generation, m.settings.Tool(), m.settings.Binary()
+	channel, source := m.settings.Channel(tool), m.settings.CoreReleaseURLs[tool]
 	return func() tea.Msg {
 		defer cancel()
 		if delay > 0 {
@@ -54,7 +55,7 @@ func (m *Model) scheduleCoreCheck(delay time.Duration) tea.Cmd {
 		}
 		checkCtx, stop := context.WithTimeout(ctx, 20*time.Second)
 		defer stop()
-		update, err := core.CheckUpdate(checkCtx, tool, bin)
+		update, err := core.CheckUpdate(checkCtx, tool, bin, channel, source)
 		return coreUpdateCheckedMsg{generation: generation, update: update, err: err}
 	}
 }

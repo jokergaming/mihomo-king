@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +27,7 @@ import (
 )
 
 const (
-	ChannelRelease = "release"
+	ChannelRelease = config.Stable
 	ChannelAlpha   = "alpha"
 
 	maxArchive = 128 << 20
@@ -37,9 +38,10 @@ var githubAPI = "https://api.github.com"
 
 // Spec describes one managed core's GitHub releases.
 type Spec struct {
-	Tool  string
-	Label string
-	Repo  string
+	Tool     string
+	Label    string
+	Repo     string
+	Endpoint string
 }
 
 // Release is the GitHub release chosen for a channel.
@@ -53,6 +55,7 @@ type Release struct {
 
 // Result is a completed install. Dest is the path that was already configured.
 type Result struct {
+	Backup    string
 	Release   Release
 	Dest      string
 	Version   string
@@ -89,25 +92,42 @@ func SpecFor(tool string) (Spec, error) {
 	}
 }
 
-// Install downloads channel's binary for tool and replaces the configured path.
-// The settings path is never rewritten: an existing custom path is overwritten
-// in place. A bare command name is replaced at the location already on PATH.
-// If tool is the running core, it is stopped before the file is replaced.
-// restart starts it again afterwards. password is used only to restore
-// cap_net_admin,cap_net_raw=ep, which a file replacement clears.
-func Install(ctx context.Context, s *config.Settings, tool, channel, password string, restart bool) (*Result, error) {
+func ReleaseSpec(tool, source string) (Spec, error) {
 	spec, err := SpecFor(tool)
 	if err != nil {
-		return nil, err
+		return Spec{}, err
 	}
-	if !ValidChannel(channel) {
-		return nil, fmt.Errorf("channel must be %s or %s", ChannelRelease, ChannelAlpha)
+	spec.Endpoint = githubAPI + "/repos/" + spec.Repo + "/releases"
+	if source == "" {
+		return spec, nil
 	}
-	rel, err := Latest(ctx, spec, channel, runtime.GOOS, runtime.GOARCH)
+	u, err := url.Parse(source)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
+		return Spec{}, fmt.Errorf("expected an HTTPS GitHub release page or releases API URL")
+	}
+	if strings.EqualFold(u.Host, "github.com") {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) == 3 && parts[2] == "releases" {
+			parts = parts[:2]
+		}
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return Spec{}, fmt.Errorf("expected https://github.com/OWNER/REPO/releases")
+		}
+		spec.Repo = strings.Join(parts, "/")
+		spec.Endpoint = githubAPI + "/repos/" + spec.Repo + "/releases"
+	} else {
+		spec.Endpoint = u.String()
+	}
+	return spec, nil
+}
+
+// Install stages a downloaded core before changing the installed binary.
+func Install(ctx context.Context, s *config.Settings, tool, channel, password string, restart bool) (*Result, error) {
+	spec, err := ReleaseSpec(tool, s.CoreReleaseURLs[tool])
 	if err != nil {
 		return nil, err
 	}
-	dest, err := installPath(s, tool)
+	rel, err := Latest(ctx, spec, channel, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return nil, err
 	}
@@ -119,41 +139,28 @@ func Install(ctx context.Context, s *config.Settings, tool, channel, password st
 	if err != nil {
 		return nil, err
 	}
-	running := false
-	if tool == s.Tool() {
-		running, _ = mihomo.Running(s)
-	}
-	if running {
-		if err := mihomo.Stop(s); err != nil {
-			return nil, fmt.Errorf("stop %s before replacing it: %w", s.ToolLabel(), err)
+	return changeBinary(ctx, s, tool, channel, restart, func(stage string, res *Result) error {
+		res.Release = rel
+		mode := os.FileMode(0755)
+		if info, err := os.Stat(res.Dest); err == nil {
+			if !info.Mode().IsRegular() {
+				return fmt.Errorf("not a regular binary: %s", res.Dest)
+			}
+			mode = info.Mode().Perm()
+			if mode&0111 == 0 {
+				mode |= 0100
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
-	}
-	if err := replaceFile(dest, bin); err != nil {
-		if running {
-			_ = mihomo.Start(s)
+		if err := os.WriteFile(stage, bin, mode); err != nil {
+			return err
 		}
-		return nil, err
-	}
-	version, _ := mihomo.BinaryVersion(ctx, dest, tool)
-	res := &Result{Release: rel, Dest: dest, Version: version}
-	if err := grantNetCaps(dest, password, res); err != nil {
-		if running {
-			_ = mihomo.Start(s)
+		if runtime.GOOS == "linux" {
+			return grantNetCaps(stage, password, res)
 		}
-		return res, err
-	}
-	if !running {
-		return res, nil
-	}
-	if !restart {
-		res.Stopped = true
-		return res, nil
-	}
-	if err := mihomo.Start(s); err != nil {
-		return res, fmt.Errorf("installed, but restart failed: %w", err)
-	}
-	res.Restarted = true
-	return res, nil
+		return nil
+	})
 }
 
 // Latest picks the newest matching GitHub release and its platform asset.
@@ -161,7 +168,7 @@ func Latest(ctx context.Context, spec Spec, channel, goos, goarch string) (Relea
 	if !ValidChannel(channel) {
 		return Release{}, fmt.Errorf("channel must be %s or %s", ChannelRelease, ChannelAlpha)
 	}
-	releases, err := fetchReleases(ctx, spec.Repo)
+	releases, err := fetchReleases(ctx, spec)
 	if err != nil {
 		return Release{}, err
 	}
@@ -182,12 +189,18 @@ func Latest(ctx context.Context, spec Spec, channel, goos, goarch string) (Relea
 	}, nil
 }
 
-func fetchReleases(ctx context.Context, repo string) ([]githubRelease, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubAPI+"/repos/"+repo+"/releases?per_page=30", nil)
+func fetchReleases(ctx context.Context, spec Spec) ([]githubRelease, error) {
+	repo := spec.Repo
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cmp.Or(spec.Endpoint, githubAPI+"/repos/"+repo+"/releases"), nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	q := req.URL.Query()
+	if !q.Has("per_page") {
+		q.Set("per_page", "30")
+	}
+	req.URL.RawQuery = q.Encode()
 	req.Header.Set("User-Agent", "mihomo-king")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -397,78 +410,6 @@ func executable(body []byte) bool {
 		bytes.HasPrefix(body, []byte{0xca, 0xfe, 0xba, 0xbe}))
 }
 
-// installPath is the file already configured for tool. An absolute path is used
-// as stored. A bare name is resolved once so the existing binary is replaced
-// without saving a different path back into settings.
-func installPath(s *config.Settings, tool string) (string, error) {
-	configured := binaryOf(s, tool)
-	if configured == "" {
-		return "", fmt.Errorf("%s binary path is not configured", tool)
-	}
-	if filepath.IsAbs(configured) {
-		return configured, nil
-	}
-	resolved, err := exec.LookPath(configured)
-	if err != nil {
-		return "", fmt.Errorf("%s binary %q was not found; set an absolute path before downloading", tool, configured)
-	}
-	if abs, err := filepath.Abs(resolved); err == nil {
-		return abs, nil
-	}
-	return resolved, nil
-}
-
-func binaryOf(s *config.Settings, tool string) string {
-	switch tool {
-	case config.ToolSingBox:
-		return s.SingBoxBin
-	case config.ToolXray:
-		return s.XrayBin
-	default:
-		return s.MihomoBin
-	}
-}
-
-func replaceFile(dest string, body []byte) error {
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		return err
-	}
-	mode := os.FileMode(0o755)
-	if info, err := os.Stat(dest); err == nil {
-		mode = info.Mode().Perm()
-		if mode&0o111 == 0 {
-			mode |= 0o755
-		}
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+"-*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.Remove(tmpName)
-		}
-	}()
-	if err := tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpName, dest); err != nil {
-		return err
-	}
-	ok = true
-	return nil
-}
-
 func needsSudoPassword() bool { return os.Geteuid() != 0 }
 
 func grantNetCaps(dest, password string, res *Result) error {
@@ -497,7 +438,14 @@ func grantNetCaps(dest, password string, res *Result) error {
 func Channels() []string { return []string{ChannelRelease, ChannelAlpha} }
 
 // ValidChannel reports whether channel is supported.
-func ValidChannel(channel string) bool { return slices.Contains(Channels(), channel) }
+func CanonicalChannel(channel string) string {
+	if channel == "release" {
+		return ChannelRelease
+	}
+	return channel
+}
+
+func ValidChannel(channel string) bool { return slices.Contains(Channels(), CanonicalChannel(channel)) }
 
 // Note formats the post-install reminder, including the release page.
 func Note(tool string, res *Result) string {
@@ -507,6 +455,9 @@ func Note(tool string, res *Result) string {
 // FormatNote formats the same install result for CLI and localized interfaces.
 func FormatNote(tool string, res *Result, format func(string, ...any) string) string {
 	note := format("installed %s %s at %s", tool, res.Release.Tag, res.Dest)
+	if res.Backup != "" {
+		note = format("restored %s backup %s at %s", tool, res.Backup, res.Dest)
+	}
 	if res.Version != "" {
 		note += " (" + res.Version + ")"
 	}
@@ -519,5 +470,8 @@ func FormatNote(tool string, res *Result, format func(string, ...any) string) st
 	if res.Caps {
 		note += "\n" + format("caps: cap_net_admin,cap_net_raw=ep")
 	}
-	return note + "\n" + format("release: %s", res.Release.URL) + "\n" + format("open the release page to see what changed")
+	if res.Release.URL != "" {
+		note += "\n" + format("release: %s", res.Release.URL) + "\n" + format("open the release page to see what changed")
+	}
+	return note
 }

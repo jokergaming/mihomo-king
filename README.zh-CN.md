@@ -66,7 +66,7 @@ make install        # 程序安装到 ~/.local/bin，补全脚本安装到 ~/.lo
       subs [--urls] · check [sub] · log [-n N] [-f]
 控制：start · stop · restart · use <sub> · update [--all] [--apply] [sub...]
       tun [on|off|toggle] [--force] · mode [rule|global|direct]
-      core download [mihomo|sing-box|xray] [--channel release|alpha]
+      core download [mihomo|sing-box|xray] [--channel stable|alpha]
 代理：groups [-s] · nodes <group> · select <group> <node>
       chain [<entry> <exit>|off]
       delay [--url URL] [--timeout 5s] <group|node> [node]
@@ -86,13 +86,17 @@ mihomo-king chain off                 # 删除生成的链式代理节点
 tail -f "$(mihomo-king paths log)"
 ```
 
-`core download` 从 GitHub 安装 mihomo、sing-box 或 Xray。`--channel release` 使用最新稳定版，
-`--channel alpha` 使用最新预发布版：mihomo 的滚动 `Prerelease-Alpha`、sing-box 最新的 `alpha`，
-或 Xray 最新的预发布版本。下载会替换已配置路径下的文件，保留自定义路径，并输出对应的 GitHub 发布页。
+设置页自动探测 `PATH` 中的内核，保留已有的自定义路径。首次下载时如果找不到内核，稳定版安装到 `~/.local/share/bin/<内核名>`，Alpha 版安装到 `~/.local/share/bin/<内核名>-alpha`。停止内核后可切换「内核渠道」。下载另一渠道时，当前渠道可以继续运行。`--channel release` 仍可作为 `stable` 的别名。
 
-如果该核心正在运行，程序会先停止它，再替换文件并重新启动。
-替换文件会清除 capabilities，因此程序会为新文件设置 `cap_net_admin,cap_net_raw=ep`；
-当前用户不是 root 时，会要求输入 sudo 密码。
+每种内核默认使用各自的官方 GitHub Releases。「内核发布地址」可为当前管理的内核设置 GitHub 仓库发布页，或返回 GitHub Releases 列表 JSON 的 HTTPS 地址。下载和更新提醒均使用该设置，清空后恢复官方源。
+
+更新时先下载并检查新内核。当前渠道正在运行时，程序会先用新内核校验现有配置，再备份旧文件、停止内核、在原路径替换并重启。重启失败会自动恢复旧文件并重新启动。Linux 按需提示输入 sudo 密码以设置网络 capabilities。每个路径和渠道默认保留最近 3 份备份，可在设置中调整；设为 0 时，成功更新后清理备份。手动恢复时在「恢复内核备份」中按 UTC 时间选择，也可使用命令行：
+
+```bash
+mihomo-king core backups
+mihomo-king core restore              # 恢复当前渠道最近的备份
+mihomo-king core restore xray --channel alpha --backup <时间戳>
+```
 
 链式代理使用当前订阅或本地节点中的两个具体节点。
 每个当前订阅只保存一条链式代理，并将其加入手动策略组供选择；切换订阅不会把该链应用到其他订阅。

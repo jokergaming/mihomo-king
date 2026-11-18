@@ -76,7 +76,7 @@ Information:  status [--json] · version · paths [settings|subs|dir|config|log|
               subs [--urls] · check [sub] · log [-n N] [-f]
 Control:      start · stop · restart · use <sub> · update [--all] [--apply] [sub...]
               tun [on|off|toggle] [--force] · mode [rule|global|direct]
-              core download [mihomo|sing-box|xray] [--channel release|alpha]
+              core download [mihomo|sing-box|xray] [--channel stable|alpha]
 Proxies:      groups [-s] · nodes <group> · select <group> <node>
               chain [<entry> <exit>|off]
               delay [--url URL] [--timeout 5s] <group|node> [node]
@@ -96,15 +96,17 @@ mihomo-king chain off                 # remove the generated chain node
 tail -f "$(mihomo-king paths log)"
 ```
 
-`core download` installs mihomo, sing-box, or xray from GitHub. `--channel release`
-uses the latest stable release; `--channel alpha` uses the latest alpha build
-(mihomo's rolling `Prerelease-Alpha` tag, sing-box's newest `alpha` tag, or
-xray's newest prerelease). The file already configured for that core is replaced
-in place, so a custom path stays custom. The command prints the GitHub release
-page afterwards — open it to see what changed. If that core is running, it is
-stopped before the file is replaced and started again afterwards. Replacing the
-file clears capabilities, so the command then sets `cap_net_admin,cap_net_raw=ep`
-on the installed binary, asking for a sudo password when it is not already root.
+Settings detects cores on `PATH` and preserves configured paths. If a core is missing, its first download goes to `~/.local/share/bin/<core>` for stable or `~/.local/share/bin/<core>-alpha` for alpha. Choose **core channel** in Settings while the core is stopped. Downloading the other channel leaves the running channel alone. `--channel release` remains an alias for `stable`.
+
+Each core defaults to its official GitHub Releases source. **Core release source** overrides the selected core for downloads and reminders. Enter a GitHub repository's releases page or an HTTPS endpoint returning the GitHub releases list in JSON. Clear it to restore the default.
+
+An update stages the new binary, checks its version, and validates the active configuration when the core is running. It backs up the previous executable, stops the running core, replaces it at its existing path and restarts it. A failed restart triggers automatic rollback. Linux downloads prompt for sudo when needed to grant network capabilities. Each path and channel keeps three backups by default; set the count to zero to discard backups after a successful update. Use **restore core backup** in Settings to select a backup by UTC timestamp, or use the CLI:
+
+```bash
+mihomo-king core backups
+mihomo-king core restore              # newest backup of the selected channel
+mihomo-king core restore xray --channel alpha --backup <timestamp>
+```
 
 The chain uses two concrete nodes from the active subscription or local nodes.
 One chain is saved at a time for the active subscription and becomes available

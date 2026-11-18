@@ -10,7 +10,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"mihomo-king/internal/config"
-	"mihomo-king/internal/mihomo"
+	"mihomo-king/internal/corebin"
 )
 
 type Update struct {
@@ -21,28 +21,24 @@ var rollingAlpha = regexp.MustCompile(`^alpha-g?([0-9a-f]+)$`)
 
 // CheckUpdate compares the configured binary with its published release.
 // Mihomo's rolling alpha has a commit ID in its asset name instead of a version.
-func CheckUpdate(ctx context.Context, tool, bin string) (Update, error) {
-	spec, err := SpecFor(tool)
+func CheckUpdate(ctx context.Context, tool, bin, channel, source string) (Update, error) {
+	spec, err := ReleaseSpec(tool, source)
 	if err != nil {
 		return Update{}, err
 	}
-	line, err := mihomo.BinaryVersion(ctx, bin, tool)
+	line, err := corebin.Version(ctx, bin, tool)
 	if err != nil {
 		return Update{}, fmt.Errorf("%s: %w", bin, err)
 	}
 	var installed string
-	channel := ChannelRelease
 	for field := range strings.FieldsSeq(line) {
 		if tool == config.ToolMihomo && rollingAlpha.MatchString(field) {
-			installed, channel = field, ChannelAlpha
+			installed = field
 			break
 		}
 		v := "v" + strings.TrimPrefix(field, "v")
 		if semver.IsValid(v) {
 			installed = v
-			if strings.Contains(semver.Prerelease(v), "alpha") {
-				channel = ChannelAlpha
-			}
 			break
 		}
 	}
@@ -55,6 +51,9 @@ func CheckUpdate(ctx context.Context, tool, bin string) (Update, error) {
 	}
 	latest := rel.Tag
 	if hash := rollingAlpha.FindStringSubmatch(installed); hash != nil {
+		if channel != ChannelAlpha {
+			return Update{}, fmt.Errorf("installed mihomo is alpha; select its alpha channel")
+		}
 		_, commit, _ := strings.Cut(rel.Asset, "-alpha-")
 		commit = strings.TrimSuffix(commit, ".gz")
 		if strings.HasPrefix(hash[1], commit) || strings.HasPrefix(commit, hash[1]) {

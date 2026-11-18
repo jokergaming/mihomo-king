@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -73,10 +72,14 @@ type Settings struct {
 	LocalNodes    []LocalNode    `yaml:"local_nodes,omitempty"`
 	Chain         *ProxyChain    `yaml:"chain,omitempty"`
 
-	DashboardLatencyEnabled  bool          `yaml:"dashboard_latency_enabled"`
-	DashboardLatencyInterval time.Duration `yaml:"dashboard_latency_interval,omitempty"`
-	CoreUpdateReminders      bool          `yaml:"core_update_reminders"`
-	CoreUpdateInterval       string        `yaml:"core_update_interval,omitempty"`
+	DashboardLatencyEnabled  bool              `yaml:"dashboard_latency_enabled"`
+	DashboardLatencyInterval time.Duration     `yaml:"dashboard_latency_interval,omitempty"`
+	CoreUpdateReminders      bool              `yaml:"core_update_reminders"`
+	CoreUpdateInterval       string            `yaml:"core_update_interval,omitempty"`
+	CoreBackupCount          int               `yaml:"core_backup_count"`
+	CoreChannels             map[string]string `yaml:"core_channels,omitempty"`
+	AlphaBinaries            map[string]string `yaml:"alpha_binaries,omitempty"`
+	CoreReleaseURLs          map[string]string `yaml:"core_release_urls,omitempty"`
 
 	appDir string // resolved at Load; not persisted
 }
@@ -139,6 +142,9 @@ func Load() (*Settings, error) {
 	}
 
 	s.applyDefaults()
+	if err := s.resolveCorePaths(); err != nil {
+		return nil, err
+	}
 	if err := ValidateDashboardLatencyInterval(s.DashboardLatencyInterval); err != nil {
 		return nil, err
 	}
@@ -205,7 +211,11 @@ func (s *Settings) ToolLabel() string {
 }
 
 func (s *Settings) Binary() string {
-	switch s.Tool() {
+	return s.CoreBinary(s.Tool(), s.Channel(s.Tool()))
+}
+
+func (s *Settings) stableBinary(tool string) string {
+	switch tool {
 	case ToolSingBox:
 		return s.SingBoxBin
 	case ToolXray:
@@ -216,7 +226,11 @@ func (s *Settings) Binary() string {
 }
 
 func (s *Settings) SetBinary(path string) {
-	switch s.Tool() {
+	s.SetCoreBinary(s.Tool(), s.Channel(s.Tool()), path)
+}
+
+func (s *Settings) setStableBinary(tool, path string) {
+	switch tool {
 	case ToolSingBox:
 		s.SingBoxBin = path
 	case ToolXray:
@@ -464,6 +478,7 @@ func defaults() *Settings {
 		DashboardLatencyEnabled:  true,
 		DashboardLatencyInterval: 10 * time.Second,
 		CoreUpdateInterval:       "1d",
+		CoreBackupCount:          3,
 	}
 }
 
@@ -558,54 +573,6 @@ func (s *Settings) ensureSecret() {
 		return
 	}
 	s.Secret = hex.EncodeToString(b)
-}
-
-func findMihomoBin() string {
-	if p := findBin([]string{"mihomo", "clash-meta", "clash"}, "mihomo"); p != "" {
-		return p
-	}
-	return "mihomo"
-}
-
-func findSingBoxBin() string {
-	if p := findBin([]string{"sing-box"}, "sing-box"); p != "" {
-		return p
-	}
-	return "sing-box"
-}
-
-func findXrayBin() string {
-	if p := findBin([]string{"xray"}, "xray"); p != "" {
-		return p
-	}
-	return "xray"
-}
-
-func findBin(names []string, fallback string) string {
-	for _, name := range names {
-		if p, err := exec.LookPath(name); err == nil {
-			return p
-		}
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if p := filepath.Join(home, ".bin", "cmd", fallback); fileExists(p) {
-			return p
-		}
-	}
-	return ""
-}
-
-func detectManagedTool() string {
-	if p := findMihomoBin(); p != "mihomo" {
-		return ToolMihomo
-	}
-	if p := findSingBoxBin(); p != "sing-box" {
-		return ToolSingBox
-	}
-	if p := findXrayBin(); p != "xray" {
-		return ToolXray
-	}
-	return ToolMihomo
 }
 
 func defaultMihomoDir() string {

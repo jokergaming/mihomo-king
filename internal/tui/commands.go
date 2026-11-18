@@ -91,7 +91,9 @@ func tickCmd() tea.Cmd {
 	return tea.Tick(3*time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-func refreshStatusCmd(s *config.Settings) tea.Cmd {
+func refreshStatusCmd(settings *config.Settings) tea.Cmd {
+	snapshot := *settings
+	s := &snapshot
 	controller, secret := s.Controller, s.Secret
 	return func() tea.Msg {
 		running, pid := mihomo.Running(s)
@@ -221,18 +223,20 @@ func switchSubCmd(s *config.Settings, name string) tea.Cmd {
 // coreDownloadCmd replaces the configured binary for tool. A running core is
 // stopped first and started again after the same path has been overwritten.
 func coreDownloadCmd(s *config.Settings, tool, channel, password string) tea.Cmd {
+	snapshot := *s
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer cancel()
-		res, err := core.Install(ctx, s, tool, channel, password, true)
-		if err != nil {
-			if res == nil {
-				return actionMsg{err: err}
-			}
-			return actionMsg{note: coreNote(tool, res), err: err, installedTool: tool}
-		}
-		return actionMsg{note: coreNote(tool, res), notice: true, installedTool: tool}
+		res, err := core.Install(ctx, &snapshot, tool, channel, password, true)
+		return coreActionMsg{coreResultMsg(tool, res, err)}
 	}
+}
+
+func coreResultMsg(tool string, res *core.Result, err error) actionMsg {
+	if res == nil {
+		return actionMsg{err: err}
+	}
+	return actionMsg{note: coreNote(tool, res), notice: err == nil, installedTool: tool, err: err}
 }
 
 func geoDownloadCmd(s *config.Settings, tools []string) tea.Cmd {

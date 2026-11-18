@@ -1,11 +1,15 @@
 package tui
 
 import (
+	"cmp"
+	"context"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +29,10 @@ const (
 	settingSingBoxBin        = "sing_box_bin"
 	settingXrayBin           = "xray_bin"
 	settingCoreGet           = "core_download"
+	settingCoreRestore       = "core_restore"
+	settingCoreBackups       = "core_backup_count"
+	settingCoreChannel       = "core_channel"
+	settingCoreSource        = "core_release_url"
 	settingCoreReminders     = "core_update_reminders"
 	settingCoreInterval      = "core_update_interval"
 	settingGeoGet            = "geo_download"
@@ -40,8 +48,13 @@ const (
 	settingDashboardInterval = "dashboard_latency_interval"
 )
 
+type backupsMsg struct {
+	names []string
+	err   error
+}
+
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.settingsSaveBusy {
+	if m.settingsSaveBusy || m.coreBusy {
 		return m, nil
 	}
 	if m.tunStage == tunAskCoreCaps {
@@ -83,6 +96,26 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	}
 	if sel.id == settingCoreGet {
 		return m.beginCoreDownload()
+	}
+	if sel.id == settingCoreRestore {
+		s := *m.settings
+		m.coreBusy = true
+		return m, func() tea.Msg {
+			names, err := core.Backups(&s, s.Tool(), s.Channel(s.Tool()))
+			return backupsMsg{names, err}
+		}
+	}
+	if sel.id == settingCoreChannel {
+		if m.running {
+			m.setErr("stop current tool before switching managed tool")
+			return m, nil
+		}
+		tool := m.settings.Tool()
+		channel := config.Alpha
+		if m.settings.Channel(tool) == config.Alpha {
+			channel = config.Stable
+		}
+		return m.savePreference(sel.id, func(s *config.Settings) { s.CoreChannels = config.WithCoreValue(s.CoreChannels, tool, channel) })
 	}
 	if sel.id == settingGeoGet {
 		return m.beginGeoDownload()
@@ -138,6 +171,36 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("cancelled")
 			return m, nil
 		case "enter":
+			switch m.settingKey {
+			case settingCoreBackups:
+				count, err := strconv.Atoi(strings.TrimSpace(m.settingInput.Value()))
+				if err != nil || count < 0 {
+					m.setErr("backup count must be a non-negative integer")
+					return m, nil
+				}
+				return m.savePreference(m.settingKey, func(s *config.Settings) { s.CoreBackupCount = count })
+			case settingCoreSource:
+				tool, raw := m.settings.Tool(), strings.TrimSpace(m.settingInput.Value())
+				if _, err := core.ReleaseSpec(tool, raw); err != nil {
+					m.setErr("invalid release source: %v", err)
+					return m, nil
+				}
+				return m.savePreference(m.settingKey, func(s *config.Settings) { s.CoreReleaseURLs = config.WithCoreValue(s.CoreReleaseURLs, tool, raw) })
+			case settingCoreRestore:
+				name := strings.TrimSpace(m.settingInput.Value())
+				if !slices.Contains(m.backups, name) {
+					m.setErr("select a listed backup")
+					return m, nil
+				}
+				m.editingSetting = false
+				m.settingInput.Blur()
+				m.coreBusy = true
+				s := *m.settings
+				return m, func() tea.Msg {
+					res, err := core.Restore(context.Background(), &s, s.Tool(), s.Channel(s.Tool()), name, true)
+					return coreActionMsg{coreResultMsg(s.Tool(), res, err)}
+				}
+			}
 			if m.settingKey == settingDashboardInterval {
 				interval, err := time.ParseDuration(strings.TrimSpace(m.settingInput.Value()))
 				if err != nil || config.ValidateDashboardLatencyInterval(interval) != nil {
@@ -204,14 +267,18 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) settingValue(key string) string {
 	switch key {
+	case settingCoreBackups:
+		return strconv.Itoa(m.settings.CoreBackupCount)
+	case settingCoreSource:
+		return m.settings.CoreReleaseURLs[m.settings.Tool()]
 	case settingCoreInterval:
 		return m.settings.CoreUpdateInterval
 	case settingMihomoBin:
-		return m.settings.MihomoBin
+		return m.settings.CoreBinary(config.ToolMihomo, m.settings.Channel(config.ToolMihomo))
 	case settingSingBoxBin:
-		return m.settings.SingBoxBin
+		return m.settings.CoreBinary(config.ToolSingBox, m.settings.Channel(config.ToolSingBox))
 	case settingXrayBin:
-		return m.settings.XrayBin
+		return m.settings.CoreBinary(config.ToolXray, m.settings.Channel(config.ToolXray))
 	case settingController:
 		return m.settings.Controller
 	case settingMixedPort:
@@ -239,11 +306,11 @@ func (m *Model) saveSettingValue(key, raw string) error {
 	}
 	switch key {
 	case settingMihomoBin:
-		m.settings.MihomoBin = raw
+		m.settings.SetCoreBinary(config.ToolMihomo, m.settings.Channel(config.ToolMihomo), raw)
 	case settingSingBoxBin:
-		m.settings.SingBoxBin = raw
+		m.settings.SetCoreBinary(config.ToolSingBox, m.settings.Channel(config.ToolSingBox), raw)
 	case settingXrayBin:
-		m.settings.XrayBin = raw
+		m.settings.SetCoreBinary(config.ToolXray, m.settings.Channel(config.ToolXray), raw)
 	case settingController:
 		hostPort := strings.TrimPrefix(strings.TrimPrefix(raw, "http://"), "https://")
 		if _, _, err := net.SplitHostPort(hostPort); err != nil {
@@ -282,20 +349,26 @@ func (m *Model) saveSettingValue(key, raw string) error {
 }
 
 func (m *Model) reloadSettings() {
+	tool := m.settings.Tool()
+	spec, _ := core.SpecFor(tool)
 	rows := []list.Item{
-		item{title: m.tr("download core"), desc: m.tr("release or alpha · replaces the configured binary · tab to choose"), id: settingCoreGet},
+		item{title: m.tr("download core"), desc: m.tr("stable or alpha · replaces the configured binary · tab to choose"), id: settingCoreGet},
 		item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders},
 	}
 	if m.settings.CoreUpdateReminders {
 		rows = append(rows, item{title: m.tr("core update check interval"), desc: m.settingValue(settingCoreInterval), id: settingCoreInterval})
 	}
 	rows = append(rows,
+		item{title: m.tr("core channel"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreChannel},
+		item{title: m.tr("restore core backup"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreRestore},
+		item{title: m.tr("backups to keep per channel"), desc: m.settingValue(settingCoreBackups), id: settingCoreBackups},
+		item{title: m.tr("core release source"), desc: cmp.Or(m.settingValue(settingCoreSource), "https://github.com/"+spec.Repo+"/releases"), id: settingCoreSource},
 		item{title: m.tr("download geoip"), desc: m.geoStatus(m.settings), id: settingGeoGet},
 		item{title: m.tr("managed tool"), desc: m.settings.ToolLabel() + m.tr("  ·  options: mihomo, sing-box, xray  ·  enter to toggle"), id: settingTool},
 		item{title: m.tr("autostart"), desc: m.autostartDescription(), id: settingAutostart},
-		item{title: m.tr("mihomo binary"), desc: m.binaryDesc(m.settings.MihomoBin), id: settingMihomoBin},
-		item{title: m.tr("sing-box binary"), desc: m.binaryDesc(m.settings.SingBoxBin), id: settingSingBoxBin},
-		item{title: m.tr("xray binary"), desc: m.binaryDesc(m.settings.XrayBin), id: settingXrayBin},
+		item{title: m.tr("mihomo binary"), desc: m.binaryDesc(m.settingValue(settingMihomoBin)), id: settingMihomoBin},
+		item{title: m.tr("sing-box binary"), desc: m.binaryDesc(m.settingValue(settingSingBoxBin)), id: settingSingBoxBin},
+		item{title: m.tr("xray binary"), desc: m.binaryDesc(m.settingValue(settingXrayBin)), id: settingXrayBin},
 		item{title: m.tr("controller"), desc: m.settings.Controller, id: settingController},
 		item{title: m.tr("mixed port"), desc: strconv.Itoa(m.settings.MixedPort), id: settingMixedPort},
 		item{title: m.tr("tun device"), desc: m.settings.TunDevice, id: settingTunDevice},
@@ -333,6 +406,8 @@ func (m Model) viewSettings() string {
 
 func (m Model) settingOptions(key string) []string {
 	switch key {
+	case settingCoreRestore:
+		return m.backups
 	case settingMode:
 		return config.Modes(m.settings.Tool())
 	case settingLogLevel:
@@ -352,12 +427,16 @@ func (m Model) optionDesc(current string, options []string) string {
 
 func (m Model) settingPrompt(key string) string {
 	switch key {
+	case settingCoreSource:
+		return m.tr("GitHub releases URL (empty for official source)")
+	case settingCoreRestore:
+		return m.tr("backup timestamp (Tab to select)")
 	case settingCoreInterval:
 		return m.tr("core update check interval (e.g. 1d, 12h or 30m)")
 	case settingDashboardInterval:
 		return m.tr("latency refresh interval (e.g. 10s or 1m, minimum 1s)")
 	case settingCoreGet:
-		return m.tr("core channel (tab cycles mihomo/sing-box/xray and release/alpha)")
+		return m.tr("core channel (tab cycles mihomo/sing-box/xray and stable/alpha)")
 	case settingGeoGet:
 		return m.tr("cores (tab cycles one core or all; one Loyalsoldier download is shared)")
 	}
@@ -385,7 +464,8 @@ func (m Model) savePreference(key string, apply func(*config.Settings)) (Model, 
 
 func (m Model) beginCoreCaps(tool, channel string) (tea.Model, tea.Cmd) {
 	m.pendingCore = coreDownload{tool: tool, channel: channel}
-	if os.Geteuid() == 0 {
+	if os.Geteuid() == 0 || runtime.GOOS != "linux" {
+		m.coreBusy = true
 		m.setStatus("downloading %s %s…", tool, channel)
 		return m, coreDownloadCmd(m.settings, tool, channel, "")
 	}
@@ -416,6 +496,7 @@ func (m Model) updateCoreCapPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			tool, channel := m.pendingCore.tool, m.pendingCore.channel
 			m.pendingCore = coreDownload{}
+			m.coreBusy = true
 			m.setStatus("downloading %s %s…", tool, channel)
 			return m, coreDownloadCmd(m.settings, tool, channel, pw)
 		}
@@ -428,8 +509,8 @@ func (m Model) updateCoreCapPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) beginCoreDownload() (tea.Model, tea.Cmd) {
 	m.editingSetting = true
 	m.settingKey = settingCoreGet
-	m.settingInput.Placeholder = m.settings.Tool() + " " + core.ChannelRelease
-	m.settingInput.SetValue(m.settings.Tool() + " " + core.ChannelRelease)
+	m.settingInput.Placeholder = m.settings.Tool() + " " + m.settings.Channel(m.settings.Tool())
+	m.settingInput.SetValue(m.settingInput.Placeholder)
 	m.settingInput.CursorEnd()
 	return m, m.settingInput.Focus()
 }

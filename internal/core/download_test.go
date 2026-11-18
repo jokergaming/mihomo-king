@@ -122,14 +122,19 @@ func TestInstallKeepsConfiguredPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := replaceFile(installMust(t, s, config.ToolMihomo), bin); err != nil {
-		t.Fatal(err)
+	if !bytes.Equal(bin, elf) {
+		t.Fatalf("extracted %q", bin)
+	}
+	exe := []byte("#!/bin/sh\necho 'Mihomo Meta v1.2.3'\n")
+	res, err := changeBinary(t.Context(), s, config.ToolMihomo, ChannelRelease, true, func(stage string, res *Result) error { return os.WriteFile(stage, exe, 0700) })
+	if err != nil || res.Dest != dest {
+		t.Fatalf("replace: %+v, %v", res, err)
 	}
 	if s.MihomoBin != dest {
 		t.Fatalf("configured path changed to %s", s.MihomoBin)
 	}
 	got, err := os.ReadFile(dest)
-	if err != nil || !bytes.Equal(got, elf) {
+	if err != nil || !bytes.Equal(got, exe) {
 		t.Fatalf("installed %q, %v", got, err)
 	}
 	info, err := os.Stat(dest)
@@ -174,7 +179,7 @@ func TestExtractArchives(t *testing.T) {
 
 func TestInstallPathRequiresExistingCommand(t *testing.T) {
 	s := &config.Settings{MihomoBin: "definitely-not-a-core-binary"}
-	if _, err := installPath(s, config.ToolMihomo); err == nil {
+	if _, err := installPath(s, config.ToolMihomo, ChannelRelease); err == nil {
 		t.Fatal("bare missing command was accepted")
 	}
 }
@@ -189,15 +194,6 @@ func releaseFrom(releases []githubRelease, spec Spec, channel, goos, goarch stri
 		return Release{}, err
 	}
 	return Release{Tag: gh.TagName, URL: gh.HTMLURL, Asset: asset.Name, Download: asset.BrowserDownloadURL}, nil
-}
-
-func installMust(t *testing.T, s *config.Settings, tool string) string {
-	t.Helper()
-	path, err := installPath(s, tool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return path
 }
 
 func gzipBytes(t *testing.T, body []byte) []byte {

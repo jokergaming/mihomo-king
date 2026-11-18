@@ -29,7 +29,7 @@ func TestCheckUpdate(t *testing.T) {
 				t.Fatal(err)
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/repos/"+spec.Repo+"/releases" {
+				if r.URL.Path != "/repos/example/"+spec.Tool+"/releases" {
 					t.Errorf("unexpected download: %s", r.URL)
 				}
 				json.NewEncoder(w).Encode([]githubRelease{{TagName: tc.tag, Prerelease: tc.alpha, Assets: []githubAsset{{Name: tc.asset, BrowserDownloadURL: "https://example.invalid/asset"}}}})
@@ -46,7 +46,11 @@ func TestCheckUpdate(t *testing.T) {
 			if err := os.WriteFile(bin, []byte("#!/bin/sh\n[ \"$1\" = '"+arg+"' ] || exit 1\necho '"+tc.line+"'\n"), 0700); err != nil {
 				t.Fatal(err)
 			}
-			got, err := CheckUpdate(t.Context(), tc.tool, bin)
+			channel := ChannelRelease
+			if tc.alpha {
+				channel = ChannelAlpha
+			}
+			got, err := CheckUpdate(t.Context(), tc.tool, bin, channel, "https://github.com/example/"+spec.Tool+"/releases")
 			if err != nil || got.Latest != tc.want {
 				t.Fatalf("CheckUpdate = %+v, %v", got, err)
 			}

@@ -24,7 +24,9 @@ func tunTestSettings(t *testing.T) *config.Settings {
 		t.Fatal(err)
 	}
 	s.MihomoDir = t.TempDir()
-	s.MihomoBin, err = os.Executable()
+	bin, err := os.Executable()
+	s.ManagedTool = config.ToolMihomo
+	s.SetBinary(bin)
 	if err != nil {
 		t.Fatal(err)
 	}

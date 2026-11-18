@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -20,14 +21,9 @@ func coreCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "core",
 		Short: "Download or upgrade a managed core",
-		Long: `Download a mihomo, sing-box or xray release into the path already configured
-for that core. An upgrade overwrites that same path and does not rewrite settings.
-The GitHub release page is printed so its changes can be reviewed.
-Replacing the file clears capabilities, so the command then sets
-cap_net_admin,cap_net_raw=ep. A sudo password is read from the terminal
-and is not stored.`,
+		Long:  "Install, back up and restore managed proxy cores.",
 	}
-	cmd.AddCommand(coreDownloadCmd())
+	cmd.AddCommand(coreDownloadCmd(), coreBackupCmd(false), coreBackupCmd(true))
 	return cmd
 }
 
@@ -59,6 +55,9 @@ is not stored.`,
 			if _, err := core.SpecFor(tool); err != nil {
 				return err
 			}
+			if !cmd.Flags().Changed("channel") {
+				channel = s.Channel(tool)
+			}
 			if !core.ValidChannel(channel) {
 				return fmt.Errorf("channel must be %s", strings.Join(core.Channels(), " or "))
 			}
@@ -84,7 +83,7 @@ is not stored.`,
 }
 
 func corePassword(cmd *cobra.Command) (string, error) {
-	if os.Geteuid() == 0 {
+	if os.Geteuid() == 0 || runtime.GOOS != "linux" {
 		return "", nil
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -102,6 +101,41 @@ func corePassword(cmd *cobra.Command) (string, error) {
 		return "", fmt.Errorf("sudo password required to set cap_net_admin,cap_net_raw=ep")
 	}
 	return string(pw), nil
+}
+
+func coreBackupCmd(restore bool) *cobra.Command {
+	var channel, backup string
+	name, description := "backups", "List retained backups, newest first"
+	if restore {
+		name, description = "restore", "Restore a backup (defaults to the newest)"
+	}
+	cmd := &cobra.Command{Use: name + " [mihomo|sing-box|xray]", Short: description, Args: cobra.MaximumNArgs(1), ValidArgsFunction: completeCores,
+		RunE: withSettings(func(cmd *cobra.Command, s *config.Settings, args []string) error {
+			tool := s.Tool()
+			if len(args) > 0 {
+				tool = args[0]
+			}
+			if channel == "" {
+				channel = s.Channel(tool)
+			}
+			if restore {
+				res, err := core.Restore(cmd.Context(), s, tool, channel, backup, true)
+				if res != nil {
+					fmt.Fprintln(cmd.OutOrStdout(), core.Note(tool, res))
+				}
+				return err
+			}
+			names, err := core.Backups(s, tool, channel)
+			for _, name := range names {
+				fmt.Fprintln(cmd.OutOrStdout(), name)
+			}
+			return err
+		})}
+	cmd.Flags().StringVar(&channel, "channel", "", "stable or alpha (default: selected channel)")
+	if restore {
+		cmd.Flags().StringVar(&backup, "backup", "", "backup timestamp from core backups")
+	}
+	return cmd
 }
 
 func geoCmd() *cobra.Command {

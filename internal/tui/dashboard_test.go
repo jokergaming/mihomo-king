@@ -61,7 +61,9 @@ func TestDashboardRefreshTracksRuntimeSelectionAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Track this test process only for the read-only Running check.
-	s.MihomoBin, err = os.Executable()
+	bin, err := os.Executable()
+	s.ManagedTool = config.ToolMihomo
+	s.SetBinary(bin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +139,8 @@ func TestDashboardRestartFailureAndBusyGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.MihomoBin = filepath.Join(t.TempDir(), "missing-core")
+	s.ManagedTool = config.ToolMihomo
+	s.SetBinary(filepath.Join(t.TempDir(), "missing-core"))
 	s.Controller = "127.0.0.1:0"
 	m, cmd := press(Model{settings: s}, keyRunes("R"))
 	if cmd == nil || !m.coreBusy || m.status.String() != "restarting…" {
