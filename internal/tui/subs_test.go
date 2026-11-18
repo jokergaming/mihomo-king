@@ -87,7 +87,7 @@ func TestImportFileCmdStoresConvertedSubscription(t *testing.T) {
 	}
 	dest := filepath.Join(dir, "subscriptions", "nodes.yaml")
 
-	msg, ok := importFileCmd("nodes", "file://"+src, dest)().(subDownloadedMsg)
+	msg, ok := importFileCmd("nodes", "file://"+src, dest, "")().(subDownloadedMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("importFileCmd = %#v", msg)
 	}
@@ -113,7 +113,7 @@ func TestDownloadCmdRecordsEmptySubscription(t *testing.T) {
 	defer srv.Close()
 
 	dest := filepath.Join(t.TempDir(), "sub.yaml")
-	msg, ok := downloadCmd("empty", srv.URL, dest)().(subDownloadedMsg)
+	msg, ok := downloadCmd("empty", srv.URL, dest, "")().(subDownloadedMsg)
 	if !ok || msg.err != nil {
 		t.Fatalf("downloadCmd = %#v", msg)
 	}
@@ -192,6 +192,8 @@ func TestUnchangedLocalNodeEditDoesNotReload(t *testing.T) {
 	m := editableSubsTestModel(t)
 	m.settings.LocalNodes = []config.LocalNode{{Name: "region/node", Link: "socks5://example.com:1080"}}
 	m.reloadSubs()
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = press(m, keyRunes("e"))
 	if !m.editLocal || m.nameInput.Value() != "region/node" {
 		t.Fatalf("local edit form not prefilled: %#v", m)

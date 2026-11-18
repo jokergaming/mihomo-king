@@ -262,7 +262,7 @@ func geoDownloadCmd(s *config.Settings, tools []string) tea.Cmd {
 	}
 }
 
-func downloadCmd(name, rawURL, dest string) tea.Cmd {
+func downloadCmd(name, rawURL, dest, group string) tea.Cmd {
 	return func() tea.Msg {
 		res, err := subscription.Download(rawURL)
 		if err != nil {
@@ -274,6 +274,7 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 		return subDownloadedMsg{
 			sub: config.Subscription{
 				Name:      name,
+				ViewGroup: group,
 				URL:       rawURL,
 				UpdatedAt: time.Now().Format("2006-01-02 15:04"),
 				UserInfo:  res.UserInfo,
@@ -286,7 +287,7 @@ func downloadCmd(name, rawURL, dest string) tea.Cmd {
 
 // importFileCmd stores a subscription read from a local file. The resolved
 // absolute path is kept so 'u' can re-read the file later.
-func importFileCmd(name, rawPath, dest string) tea.Cmd {
+func importFileCmd(name, rawPath, dest, group string) tea.Cmd {
 	return func() tea.Msg {
 		path, err := subscription.ResolvePath(rawPath)
 		if err != nil {
@@ -302,6 +303,7 @@ func importFileCmd(name, rawPath, dest string) tea.Cmd {
 		return subDownloadedMsg{
 			sub: config.Subscription{
 				Name:      name,
+				ViewGroup: group,
 				Path:      path,
 				UpdatedAt: time.Now().Format("2006-01-02 15:04"),
 			},
@@ -350,9 +352,9 @@ func completePathCmd(input string) tea.Cmd {
 	}
 }
 
-func addLocalNodeCmd(s *config.Settings, rawLink string) tea.Cmd {
+func addLocalNodeCmd(s *config.Settings, rawLink, group string) tea.Cmd {
 	return func() tea.Msg {
-		node, err := s.AddLocalNode(rawLink)
+		node, err := s.AddLocalNodeInGroup(rawLink, group)
 		if err != nil {
 			return actionMsg{err: err}
 		}

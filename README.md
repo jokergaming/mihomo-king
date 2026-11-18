@@ -12,6 +12,7 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - Download subscriptions or import them from local files: Clash/mihomo YAML,
   base64 node lists, or node links one per line.
 - Add local nodes from share links (vmess, vless, ss, trojan, hysteria2, socks5, http).
+- Organize the subscription view into nested groups. Other subscriptions and custom groups appear first, followed by **Imported configuration files** and **Imported individual nodes**. Press `f` to create a group, `Enter` to open it, and `Esc` to go back. To move an entry, press `m`, browse to the destination, and press `v`.
 - Switch the active subscription and reload the managed core.
 - Choose mihomo, sing-box, or Xray in **Settings → Startup and runtime**.
 - Enable **core update reminders** in **Settings → Core management → Core updates** to check the managed core on startup and while the TUI is open. The check interval defaults to `1d` and accepts values such as `12h` or `30m`. Press `F2` to dismiss the version shown in the upper-right corner.

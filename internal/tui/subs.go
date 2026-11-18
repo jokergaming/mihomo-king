@@ -15,6 +15,9 @@ import (
 )
 
 func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.settingsSaveBusy {
+		return m, nil
+	}
 	if m.updatePrompt != "" {
 		return m.updateSourcePrompt(msg)
 	}
@@ -33,7 +36,32 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if wrapListKey(&m.subs, k.String()) {
 			return m, nil
 		}
+		if m.movingSub != "" {
+			return m.updateMoveSub(k)
+		}
+		sel, _ := m.subs.SelectedItem().(item)
+		folder, isFolder := strings.CutPrefix(sel.id, folderRowPrefix)
+		if isFolder {
+			switch k.String() {
+			case "enter":
+				m.openSubFolder(folder)
+				return m, nil
+			case "d":
+				return m.deleteSubFolder(folder)
+			case "e", "u", "m":
+				return m, nil
+			}
+		}
 		switch k.String() {
+		case "f":
+			return m.openAddForm(addSubGroup)
+		case "m":
+			if sel.id != "" {
+				m.moveFromFolder = m.subFolder
+				m.movingSub = sel.id
+				m.openSubFolder(m.subFolder)
+			}
+			return m, nil
 		case "a":
 			return m.openAddForm(addSub)
 		case "i":
@@ -48,7 +76,11 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.deleteSelectedSub()
 		case "enter":
 			return m.activateSelectedSub()
-		case "esc":
+		case "esc", "backspace":
+			if m.subFolder != "" {
+				m.leaveSubFolder()
+				return m, nil
+			}
 			return m.switchScreen(screenDashboard)
 		}
 		if nm, cmd, handled := m.globalKey(k.String()); handled {
@@ -192,6 +224,8 @@ func (m Model) openAddForm(form addForm) (tea.Model, tea.Cmd) {
 	m.nameInput.Blur()
 	m.urlInput.Blur()
 	switch form {
+	case addSubGroup:
+		m.nameInput.Placeholder = m.tr("group name")
 	case addSub:
 		m.nameInput.Placeholder = m.tr("name (e.g. provider-a)")
 		m.urlInput.Placeholder = "https://example.com/sub.yaml"
@@ -208,7 +242,7 @@ func (m Model) openAddForm(form addForm) (tea.Model, tea.Cmd) {
 // addInput returns the input the open form is editing: the subscription form
 // asks name then url, the file form path then name, the node form a link.
 func (m *Model) addInput() *textinput.Model {
-	if m.addForm == addSub && m.addStage == 0 || m.addForm == addFile && m.addStage == 1 {
+	if m.addForm == addSubGroup || m.addForm == addSub && m.addStage == 0 || m.addForm == addFile && m.addStage == 1 {
 		return &m.nameInput
 	}
 	return &m.urlInput
@@ -227,6 +261,8 @@ func (m Model) updateAddForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			switch m.addForm {
+			case addSubGroup:
+				return m.createSubFolder()
 			case addNode:
 				rawLink := strings.TrimSpace(m.urlInput.Value())
 				if rawLink == "" {
@@ -235,7 +271,7 @@ func (m Model) updateAddForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.addForm = addNone
 				m.setStatus("adding local node…")
-				return m, addLocalNodeCmd(m.settings, rawLink)
+				return m, addLocalNodeCmd(m.settings, rawLink, m.subFolder)
 			case addFile:
 				return m.fileFormEnter()
 			}
@@ -261,10 +297,10 @@ func (m Model) updateAddForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.addForm = addNone
 			if subscription.IsLocalPath(rawURL) {
 				m.setStatus("importing %s…", name)
-				return m, importFileCmd(name, rawURL, m.settings.SubPath(name))
+				return m, importFileCmd(name, rawURL, m.settings.SubPath(name), m.subFolder)
 			}
 			m.setStatus("downloading %s…", name)
-			return m, downloadCmd(name, rawURL, m.settings.SubPath(name))
+			return m, downloadCmd(name, rawURL, m.settings.SubPath(name), m.subFolder)
 		}
 	}
 	in := m.addInput()
@@ -296,7 +332,7 @@ func (m Model) fileFormEnter() (tea.Model, tea.Cmd) {
 	}
 	m.addForm = addNone
 	m.setStatus("importing %s…", name)
-	return m, importFileCmd(name, rawPath, m.settings.SubPath(name))
+	return m, importFileCmd(name, rawPath, m.settings.SubPath(name), m.subFolder)
 }
 
 func (m Model) updateSelectedSub() (tea.Model, tea.Cmd) {
@@ -323,9 +359,9 @@ func (m Model) updateSubByName(name string) (tea.Model, tea.Cmd) {
 	}
 	m.setStatus("updating %s…", sub.Name)
 	if sub.Path != "" {
-		return m, importFileCmd(sub.Name, sub.Path, m.settings.SubPath(sub.Name))
+		return m, importFileCmd(sub.Name, sub.Path, m.settings.SubPath(sub.Name), sub.ViewGroup)
 	}
-	return m, downloadCmd(sub.Name, sub.URL, m.settings.SubPath(sub.Name))
+	return m, downloadCmd(sub.Name, sub.URL, m.settings.SubPath(sub.Name), sub.ViewGroup)
 }
 
 func (m Model) deleteSelectedSub() (tea.Model, tea.Cmd) {
@@ -393,6 +429,8 @@ func (m Model) viewSubs() string {
 			"  " + sourceLabel + m.urlInput.View()
 	}
 	switch m.addForm {
+	case addSubGroup:
+		return titleStyle.Render(m.tr("New group in %s", m.subFolderTitle())) + "\n\n" + m.nameInput.View()
 	case addNode:
 		return titleStyle.Render(m.tr("Add local node")) + "\n\n" +
 			m.tr("  link: ") + m.urlInput.View()
@@ -406,14 +444,11 @@ func (m Model) viewSubs() string {
 			m.tr("  name: ") + m.nameInput.View() + "\n\n" +
 			dimStyle.Render(m.tr("  Clash/mihomo YAML, a base64 node list, or node links one per line"))
 	}
-	if len(m.settings.Subscriptions) == 0 && len(m.settings.LocalNodes) == 0 {
-		return dimStyle.Render(m.tr("No subscriptions yet — press 'a' to add one, 'i' to import a file or 'n' to add a local node."))
-	}
 	return m.listView(m.subs)
 }
 
 func localNodeID(id string) (string, bool) {
-	name, ok := strings.CutPrefix(id, "local:")
+	name, ok := strings.CutPrefix(id, localRowPrefix)
 	return name, ok
 }
 

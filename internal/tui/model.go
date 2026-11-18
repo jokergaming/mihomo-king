@@ -46,6 +46,7 @@ const (
 	addSub          // name, then url
 	addNode         // node link
 	addFile         // file path, then name
+	addSubGroup
 )
 
 // Model is the root Bubble Tea model.
@@ -82,17 +83,20 @@ type Model struct {
 	pwInput    textinput.Model
 
 	// subscriptions
-	subs         list.Model
-	addForm      addForm
-	addStage     int // field of the open form being edited: 0 = first, 1 = second
-	editingSub   bool
-	editID       string
-	editSource   string
-	editLocal    bool
-	editStage    int
-	updatePrompt string
-	nameInput    textinput.Model
-	urlInput     textinput.Model // url, node link or file path
+	subFolder      string
+	movingSub      string
+	moveFromFolder string
+	subs           list.Model
+	addForm        addForm
+	addStage       int // field of the open form being edited: 0 = first, 1 = second
+	editingSub     bool
+	editID         string
+	editSource     string
+	editLocal      bool
+	editStage      int
+	updatePrompt   string
+	nameInput      textinput.Model
+	urlInput       textinput.Model // url, node link or file path
 
 	// nodes
 	groups         []api.Group
@@ -290,6 +294,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		msg.apply(m.settings)
+		if msg.key == subGroupPreference {
+			m.movingSub = ""
+			m.addForm = addNone
+			m.reloadSubs()
+			m.setStatus("group saved")
+			return m, nil
+		}
 		m.editingSetting = false
 		m.settingInput.Blur()
 		m.reloadSettings()
@@ -416,6 +427,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if previous, _ := m.settings.FindSub(msg.sub.Name); previous != nil && msg.sub.NoNodes {
 			msg.sub.NeedsUpdate = previous.NeedsUpdate
+		}
+		if !m.hasSubFolder(msg.sub.ViewGroup) {
+			msg.sub.ViewGroup = ""
 		}
 		m.settings.UpsertSub(msg.sub)
 		if err := m.settings.Save(); err != nil {
@@ -659,6 +673,8 @@ func (m Model) screenHelp() string {
 	switch m.screen {
 	case screenSubs:
 		switch {
+		case m.movingSub != "":
+			return m.tr("enter open group · backspace up · v move here · esc cancel")
 		case m.updatePrompt != "":
 			return m.tr("y update now · n keep current · esc keep current")
 		case m.editingSub && m.editStage == 1 && !m.editLocal && m.editSourceIsFile():
@@ -673,7 +689,7 @@ func (m Model) screenHelp() string {
 		if m.subs.FilterState() == list.Filtering {
 			return m.tr("type to filter · enter apply · esc cancel")
 		}
-		return m.tr("a add sub · i import file · n add node · e edit · u update · enter activate · d delete · / filter · tab/1/2/3/4 switch · q quit")
+		return m.tr("f new group · m move · enter open/activate · esc back · a add sub · i import · n add node · e edit · u update · d delete · / filter")
 	case screenNodes:
 		if m.editingTestURL {
 			return m.tr("enter save url · esc cancel")
@@ -761,9 +777,16 @@ func wrapListKey(l *list.Model, key string) bool {
 	return false
 }
 
-func (m *Model) reloadSubs() {
+func (m Model) subRows() []list.Item {
 	items := make([]list.Item, 0, len(m.settings.Subscriptions)+len(m.settings.LocalNodes))
 	for _, sub := range m.settings.Subscriptions {
+		defaultFolder := ""
+		if sub.Path != "" {
+			defaultFolder = fileSubFolder
+		}
+		if m.movingSub != "" || entryFolder(sub.ViewGroup, defaultFolder) != m.subFolder {
+			continue
+		}
 		source := sub.URL
 		if sub.Path != "" {
 			source = m.tr("file · ") + sub.Path
@@ -785,13 +808,25 @@ func (m *Model) reloadSubs() {
 		items = append(items, item{title: title, desc: desc, id: sub.Name})
 	}
 	for _, node := range m.settings.LocalNodes {
+		if m.movingSub != "" || entryFolder(node.ViewGroup, nodeSubFolder) != m.subFolder {
+			continue
+		}
 		items = append(items, item{
 			title: m.tr("Local / ") + node.Name,
 			desc:  m.tr("local node · ") + node.Link,
-			id:    "local:" + node.Name,
+			id:    localRowPrefix + node.Name,
 		})
 	}
-	m.subs.SetItems(items)
+	return m.appendSubFolders(items)
+}
+
+func (m *Model) reloadSubs() {
+	m.subs.Title = m.subFolderTitle()
+	previous := m.subs
+	m.subs.SetItems(m.subRows())
+	if previous.FilterState() != list.Unfiltered {
+		restoreListState(&m.subs, previous)
+	}
 }
 
 func (m *Model) setStatus(key string, args ...any) { m.setTextStatus(message(key, args...)) }

@@ -95,9 +95,10 @@ func (m *Model) refreshLanguage() {
 		restoreListState(pair.current, pair.previous)
 		pair.current.FilterInput.Prompt = m.tr("Filter: ")
 	}
-	m.subs.Title = m.tr("Subscriptions")
 	m.nameInput.Placeholder = m.tr("name (e.g. provider-a)")
-	if m.addForm == addFile {
+	if m.addForm == addSubGroup {
+		m.nameInput.Placeholder = m.tr("group name")
+	} else if m.addForm == addFile {
 		m.nameInput.Placeholder = m.tr("defaults to the file name")
 	}
 	switch {
