@@ -31,6 +31,8 @@ const (
 	settingXrayBin           = "xray_bin"
 	settingCoreGet           = "core_download"
 	settingCoreRestore       = "core_restore"
+	settingDeleteBackup      = "delete_core_backup"
+	settingDeleteBackups     = "delete_all_core_backups"
 	settingCoreBackups       = "core_backup_count"
 	settingBackupRoot        = "core_backup_root"
 	settingCoreChannel       = "core_channel"
@@ -55,8 +57,29 @@ type backupsMsg struct {
 	err   error
 }
 
+type backupDeletionMsg struct {
+	plan core.BackupDeletion
+	err  error
+}
+type backupsDeletedMsg struct{ err error }
+
 func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.settingsSaveBusy || m.coreBusy {
+		return m, nil
+	}
+	if m.pendingDeletion != nil {
+		if key, ok := msg.(tea.KeyMsg); ok {
+			switch key.String() {
+			case "y":
+				plan := m.pendingDeletion
+				m.pendingDeletion = nil
+				m.coreBusy = true
+				return m, func() tea.Msg { return backupsDeletedMsg{plan.Delete()} }
+			case "esc", "n":
+				m.pendingDeletion = nil
+				m.setStatus("cancelled")
+			}
+		}
 		return m, nil
 	}
 	if m.tunStage == tunAskCoreCaps {
@@ -99,8 +122,14 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	if sel.id == settingCoreGet {
 		return m.beginCoreDownload()
 	}
-	if sel.id == settingCoreRestore {
+	if sel.id == settingDeleteBackups {
 		s := *m.settings
+		m.coreBusy = true
+		return m, func() tea.Msg { plan, err := core.PlanDeleteAllBackups(&s); return backupDeletionMsg{plan, err} }
+	}
+	if sel.id == settingCoreRestore || sel.id == settingDeleteBackup {
+		s := *m.settings
+		m.settingKey = sel.id
 		m.coreBusy = true
 		return m, func() tea.Msg {
 			names, err := core.Backups(&s, s.Tool(), s.Channel(s.Tool()))
@@ -204,7 +233,7 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				return m.savePreference(m.settingKey, func(s *config.Settings) { s.CoreReleaseURLs = config.WithCoreValue(s.CoreReleaseURLs, tool, raw) })
-			case settingCoreRestore:
+			case settingCoreRestore, settingDeleteBackup:
 				name := strings.TrimSpace(m.settingInput.Value())
 				if !slices.Contains(m.backups, name) {
 					m.setErr("select a listed backup")
@@ -214,6 +243,12 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.settingInput.Blur()
 				m.coreBusy = true
 				s := *m.settings
+				if m.settingKey == settingDeleteBackup {
+					return m, func() tea.Msg {
+						plan, err := core.PlanDeleteBackup(&s, s.Tool(), s.Channel(s.Tool()), name)
+						return backupDeletionMsg{plan, err}
+					}
+				}
 				return m, func() tea.Msg {
 					res, err := core.Restore(context.Background(), &s, s.Tool(), s.Channel(s.Tool()), name, true)
 					return coreActionMsg{coreResultMsg(s.Tool(), res, err)}
@@ -385,6 +420,8 @@ func (m *Model) reloadSettings() {
 	rows = append(rows,
 		item{title: m.tr("core channel"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreChannel},
 		item{title: m.tr("restore core backup"), desc: dir, id: settingCoreRestore},
+		item{title: m.tr("delete one backup"), desc: dir, id: settingDeleteBackup},
+		item{title: m.tr("delete all core backups"), desc: m.tr("all configured cores and channels"), id: settingDeleteBackups},
 		item{title: m.tr("core backup root"), desc: cmp.Or(m.settings.CoreBackupRoot, m.tr("beside the core binary")), id: settingBackupRoot},
 		item{title: m.tr("backups to keep per channel"), desc: m.settingValue(settingCoreBackups), id: settingCoreBackups},
 		item{title: m.tr("core release source"), desc: cmp.Or(m.settingValue(settingCoreSource), "https://github.com/"+spec.Repo+"/releases"), id: settingCoreSource},
@@ -413,6 +450,10 @@ func (m *Model) reloadSettings() {
 }
 
 func (m Model) viewSettings() string {
+	if m.pendingDeletion != nil {
+		paths := strings.Join(m.pendingDeletion.Paths(), "\n")
+		return warnStyle.Render(m.tr("Delete the following backups?")) + "\n\n" + ansi.Hardwrap(paths, max(1, m.width-4), false)
+	}
 	body := m.listView(m.settingsList)
 	if row, ok := m.settingsList.SelectedItem().(item); ok && (row.id == settingCoreRestore || row.id == settingBackupRoot) {
 		width := max(1, m.width-4)
@@ -437,7 +478,7 @@ func (m Model) viewSettings() string {
 
 func (m Model) settingOptions(key string) []string {
 	switch key {
-	case settingCoreRestore:
+	case settingCoreRestore, settingDeleteBackup:
 		return m.backups
 	case settingMode:
 		return config.Modes(m.settings.Tool())
@@ -462,7 +503,7 @@ func (m Model) settingPrompt(key string) string {
 		return m.tr("backup root (empty for default)")
 	case settingCoreSource:
 		return m.tr("GitHub releases URL (empty for official source)")
-	case settingCoreRestore:
+	case settingCoreRestore, settingDeleteBackup:
 		return m.tr("backup timestamp (Tab to select)")
 	case settingCoreInterval:
 		return m.tr("core update check interval (e.g. 1d, 12h or 30m)")

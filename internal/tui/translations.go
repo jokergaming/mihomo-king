@@ -4,6 +4,13 @@ import "mihomo-king/internal/core"
 
 // English templates are stable keys; arguments keep user content untranslated.
 var chinese = map[string]string{
+	"delete one backup":                                        "删除单个备份",
+	"delete all core backups":                                  "删除所有内核备份",
+	"all configured cores and channels":                        "所有已配置内核和渠道",
+	"Delete the following backups?":                            "确认删除以下备份？",
+	"y delete · n/esc cancel":                                  "y 删除 · n/esc 取消",
+	"no core backup folders found":                             "没有找到内核备份文件夹",
+	"backup deletion complete":                                 "备份已删除",
 	"core backup root":                                         "内核备份根目录",
 	"beside the core binary":                                   "默认（内核文件旁）",
 	"backup root (empty for default)":                          "备份根目录（留空恢复默认）",

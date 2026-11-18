@@ -52,11 +52,16 @@ func installPath(s *config.Settings, tool, channel string) (string, error) {
 	return "", err
 }
 
-func backupDir(root, dest, tool, channel string) string {
+func backupLocation(root, dest, tool, channel string) (string, string) {
 	if root == "" {
 		root = filepath.Join(filepath.Dir(dest), ".mihomo-king-backups")
 	}
-	return filepath.Join(root, tool, CanonicalChannel(channel), filepath.Base(dest))
+	return root, filepath.Join(tool, CanonicalChannel(channel), filepath.Base(dest))
+}
+
+func backupDir(root, dest, tool, channel string) string {
+	base, relative := backupLocation(root, dest, tool, channel)
+	return filepath.Join(base, relative)
 }
 
 func BackupDir(s *config.Settings, tool, channel string) (string, error) {
@@ -65,6 +70,18 @@ func BackupDir(s *config.Settings, tool, channel string) (string, error) {
 		return "", err
 	}
 	return backupDir(s.CoreBackupRoot, dest, tool, channel), nil
+}
+
+func lockInstallDir(dir string) (*os.File, error) {
+	lock, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		lock.Close()
+		return nil, fmt.Errorf("lock %s: %w", dir, err)
+	}
+	return lock, nil
 }
 
 func backupNames(dir string) ([]string, error) {
@@ -129,20 +146,17 @@ func changeBinary(ctx context.Context, s *config.Settings, tool, channel string,
 		return nil, fmt.Errorf("core backup count must be non-negative")
 	}
 	dir := backupDir(s.CoreBackupRoot, dest, tool, channel)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
-	}
 	// Lock at the install location even when concurrent callers use different backup roots.
 	if err := os.MkdirAll(filepath.Dir(dest), 0700); err != nil {
 		return nil, err
 	}
-	lock, err := os.Open(filepath.Dir(dest))
+	lock, err := lockInstallDir(filepath.Dir(dest))
 	if err != nil {
 		return nil, err
 	}
 	defer lock.Close()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return nil, fmt.Errorf("lock %s: %w", dest, err)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
 	}
 	tmp, err := os.MkdirTemp(filepath.Dir(dest), ".mihomo-king-update-")
 	if err != nil {

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,71 @@ import (
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/core"
 )
+
+func TestBackupDeletionSettings(t *testing.T) {
+	dir := t.TempDir()
+	s := &config.Settings{MihomoBin: filepath.Join(dir, "mihomo"), CoreBackupRoot: dir, Language: config.LanguageChinese}
+	backupDir, err := core.BackupDir(s, "mihomo", "stable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(backupDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	stamp := "20260102T000000.000000000Z"
+	path := filepath.Join(backupDir, stamp)
+	if err := os.WriteFile(path, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := New(s)
+	m.screen = screenSettings
+	m.width = 240
+	enter := tea.KeyMsg{Type: tea.KeyEnter}
+	selectAction := func(id string) {
+		t.Helper()
+		for i, row := range m.settingsList.Items() {
+			if row.(item).id == id {
+				m.settingsList.Select(i)
+				return
+			}
+		}
+		t.Fatalf("missing action %s", id)
+	}
+	run := func(key tea.KeyMsg) {
+		t.Helper()
+		var cmd tea.Cmd
+		m, cmd = press(m, key)
+		if cmd == nil {
+			t.Fatal("expected backup command")
+		}
+		m, _ = press(m, cmd())
+	}
+	selectAction(settingDeleteBackups)
+	run(enter)
+	if !strings.Contains(m.viewSettings(), backupDir) {
+		t.Fatal("missing folder preview")
+	}
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if _, err := os.Stat(path); err != nil || m.pendingDeletion != nil {
+		t.Fatal("cancelled deletion did not preserve backup")
+	}
+	selectAction(settingDeleteBackup)
+	run(enter)
+	run(enter)
+	if !strings.Contains(m.viewSettings(), path) {
+		t.Fatal("missing file preview")
+	}
+	run(keyRunes("y"))
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("single backup still exists")
+	}
+	selectAction(settingDeleteBackups)
+	run(enter)
+	run(keyRunes("y"))
+	if _, err := os.Stat(backupDir); !os.IsNotExist(err) {
+		t.Fatal("backup folder still exists")
+	}
+}
 
 func TestBackupDirectorySettings(t *testing.T) {
 	home := t.TempDir()

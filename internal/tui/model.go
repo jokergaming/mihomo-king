@@ -113,6 +113,7 @@ type Model struct {
 	settingsSaveBusy bool
 	pendingCore      coreDownload
 	backups          []string
+	pendingDeletion  *core.BackupDeletion
 	autostartEnabled bool
 	autostartLoaded  bool
 	autostartBusy    bool
@@ -302,11 +303,32 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.backups = msg.names
-		m.settingKey = settingCoreRestore
 		m.editingSetting = true
 		m.settingInput.SetValue(msg.names[0])
 		m.settingInput.CursorEnd()
 		return m, m.settingInput.Focus()
+
+	case backupDeletionMsg:
+		m.coreBusy = false
+		if msg.err != nil {
+			m.setError(msg.err)
+			return m, nil
+		}
+		if len(msg.plan.Paths()) == 0 {
+			m.setStatus("no core backup folders found")
+			return m, nil
+		}
+		m.pendingDeletion = &msg.plan
+		return m, nil
+	case backupsDeletedMsg:
+		m.coreBusy = false
+		m.backups = nil
+		if msg.err != nil {
+			m.setError(msg.err)
+		} else {
+			m.setStatus("backup deletion complete")
+		}
+		return m, nil
 
 	case languageSavedMsg:
 		m.languageBusy = false
@@ -642,6 +664,9 @@ func (m Model) screenHelp() string {
 		}
 		return m.tr("enter open/select · c set chain · x clear chain · l test · a test group · u set url · esc back · r reload · / filter · tab/1/2/3/4 switch · q quit")
 	case screenSettings:
+		if m.pendingDeletion != nil {
+			return m.tr("y delete · n/esc cancel")
+		}
 		if m.tunStage == tunAskCoreCaps {
 			return m.tr("enter confirm · esc cancel")
 		}
