@@ -70,7 +70,7 @@ func TestSubscriptionMoveIntoNestedGroupPersists(t *testing.T) {
 		t.Fatal("missing move command")
 	}
 	m, cmd = press(m, cmd())
-	if cmd != nil || m.statusErr || m.movingSub != "" {
+	if cmd != nil || m.statusErr || len(m.movingSubs) != 0 {
 		t.Fatalf("move failed or triggered a runtime command: %s", m.status)
 	}
 	assertSubRows(t, m, "provider")

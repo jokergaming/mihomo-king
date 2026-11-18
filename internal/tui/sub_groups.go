@@ -2,12 +2,12 @@ package tui
 
 import (
 	"cmp"
+	"maps"
 	"path"
 	"slices"
 	"strings"
 	"unicode"
 
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"mihomo-king/internal/config"
@@ -62,27 +62,10 @@ func (m Model) subFolderTitle() string {
 			title += " / " + strings.ReplaceAll(rest, "/", " / ")
 		}
 	}
-	if m.movingSub != "" {
-		return m.tr("Move to %s", title)
+	if len(m.movingSubs) > 0 {
+		return m.tr("Move %d item(s) to %s", len(m.movingSubs), title)
 	}
 	return title
-}
-
-func (m Model) appendSubFolders(rows []list.Item) []list.Item {
-	appendFolder := func(folder, name string) {
-		rows = append(rows, item{id: folderRowPrefix + folder, title: "▸ " + name, desc: m.tr("Group")})
-	}
-	for _, group := range m.settings.SubscriptionGroups {
-		if parentSubFolder(group) == m.subFolder {
-			appendFolder(group, path.Base(group))
-		}
-	}
-	if m.subFolder == "" {
-		for _, folder := range defaultSubFolders {
-			appendFolder(folder.id, m.tr(folder.label))
-		}
-	}
-	return rows
 }
 
 func (m *Model) openSubFolder(folder string) {
@@ -132,13 +115,13 @@ func (m Model) deleteSubFolder(folder string) (tea.Model, tea.Cmd) {
 		m.setErr("the default group is permanent")
 		return m, nil
 	}
-	mCopy := m
-	mCopy.subFolder = folder
-	if len(mCopy.subRows()) > 0 {
+	if len(m.subChildren()[folder]) > 0 {
 		m.setErr("move the contents out before deleting this group")
 		return m, nil
 	}
 	return m.savePreference(subGroupPreference, func(s *config.Settings) {
+		s.SubscriptionGroupOrder = maps.Clone(s.SubscriptionGroupOrder)
+		delete(s.SubscriptionGroupOrder, folder)
 		s.SubscriptionGroups = slices.DeleteFunc(slices.Clone(s.SubscriptionGroups), func(group string) bool { return group == folder })
 	})
 }
@@ -146,8 +129,10 @@ func (m Model) deleteSubFolder(folder string) (tea.Model, tea.Cmd) {
 func (m Model) updateMoveSub(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch k.String() {
 	case "esc":
-		m.movingSub = ""
+		m.movingSubs = nil
 		m.openSubFolder(m.moveFromFolder)
+		m.restoreSubFilter()
+		m.focusSub(m.subFocus)
 	case "backspace":
 		if m.subFolder != "" {
 			m.leaveSubFolder()
@@ -159,19 +144,21 @@ func (m Model) updateMoveSub(k tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case "v":
-		id, group := m.movingSub, m.subFolder
-		if group == "" {
-			group = explicitRoot
-		}
+		ids, group := m.movingSubs, cmp.Or(m.subFolder, explicitRoot)
 		return m.savePreference(subGroupPreference, func(s *config.Settings) {
-			if name, local := localNodeID(id); local {
-				if _, i := s.FindLocalNode(name); i >= 0 {
-					s.LocalNodes = slices.Clone(s.LocalNodes)
+			s.Subscriptions = slices.Clone(s.Subscriptions)
+			s.LocalNodes = slices.Clone(s.LocalNodes)
+			for i, sub := range s.Subscriptions {
+				if ids[sub.Name] && sub.ViewGroup != group {
+					s.Subscriptions[i].ViewOrder = 0
+					s.Subscriptions[i].ViewGroup = group
+				}
+			}
+			for i, node := range s.LocalNodes {
+				if ids[localRowPrefix+node.Name] && node.ViewGroup != group {
+					s.LocalNodes[i].ViewOrder = 0
 					s.LocalNodes[i].ViewGroup = group
 				}
-			} else if _, i := s.FindSub(id); i >= 0 {
-				s.Subscriptions = slices.Clone(s.Subscriptions)
-				s.Subscriptions[i].ViewGroup = group
 			}
 		})
 	default:

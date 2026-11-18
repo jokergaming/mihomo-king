@@ -22,6 +22,7 @@ import (
 // at <appdir>/subscriptions/<Name>.yaml. Updating re-downloads URL, or re-reads
 // Path for a subscription imported from a local file.
 type Subscription struct {
+	ViewOrder   int    `yaml:"view_order,omitempty"`
 	ViewGroup   string `yaml:"view_group,omitempty"`
 	Name        string `yaml:"name"`
 	URL         string `yaml:"url,omitempty"`
@@ -35,6 +36,7 @@ type Subscription struct {
 // LocalNode is a single node link pasted by the user. It is merged into the
 // runtime config under the Local proxy group.
 type LocalNode struct {
+	ViewOrder int    `yaml:"view_order,omitempty"`
 	ViewGroup string `yaml:"view_group,omitempty"`
 	Name      string `yaml:"name"`
 	Link      string `yaml:"link"`
@@ -74,7 +76,10 @@ type Settings struct {
 	LocalNodes    []LocalNode    `yaml:"local_nodes,omitempty"`
 	Chain         *ProxyChain    `yaml:"chain,omitempty"`
 
-	SubscriptionGroups []string `yaml:"subscription_groups,omitempty"`
+	SubscriptionTree       bool           `yaml:"subscription_tree,omitempty"`
+	SubscriptionSort       string         `yaml:"subscription_sort,omitempty"`
+	SubscriptionGroupOrder map[string]int `yaml:"subscription_group_order,omitempty"`
+	SubscriptionGroups     []string       `yaml:"subscription_groups,omitempty"`
 
 	DashboardLatencyEnabled  bool              `yaml:"dashboard_latency_enabled"`
 	DashboardLatencyInterval time.Duration     `yaml:"dashboard_latency_interval,omitempty"`
@@ -269,6 +274,7 @@ func (s *Settings) FindSub(name string) (*Subscription, int) {
 // UpsertSub inserts or replaces a subscription by name.
 func (s *Settings) UpsertSub(sub Subscription) {
 	if _, i := s.FindSub(sub.Name); i >= 0 {
+		sub.ViewOrder = s.Subscriptions[i].ViewOrder
 		sub.ViewGroup = s.Subscriptions[i].ViewGroup
 		s.Subscriptions[i] = sub
 		return
@@ -382,6 +388,7 @@ func (s *Settings) AddLocalNodeInGroup(rawLink, group string) (LocalNode, error)
 		return LocalNode{}, fmt.Errorf("node name required")
 	}
 	if _, i := s.FindLocalNode(node.Name); i >= 0 {
+		node.ViewOrder = s.LocalNodes[i].ViewOrder
 		node.ViewGroup = s.LocalNodes[i].ViewGroup
 		s.LocalNodes[i] = node
 	} else {
@@ -423,7 +430,7 @@ func (s *Settings) EditLocalNode(oldName, name, link string) error {
 		oldChain = new(ProxyChain)
 		*oldChain = *s.Chain
 	}
-	s.LocalNodes[index] = LocalNode{Name: name, Link: link, ViewGroup: old.ViewGroup}
+	s.LocalNodes[index] = LocalNode{Name: name, Link: link, ViewGroup: old.ViewGroup, ViewOrder: old.ViewOrder}
 	if s.Chain != nil {
 		if s.Chain.Entry == oldName {
 			s.Chain.Entry = name

@@ -28,6 +28,9 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateAddForm(msg)
 	}
 	if k, ok := msg.(tea.KeyMsg); ok {
+		if m.sortSubs {
+			return m.updateSortMenu(k)
+		}
 		if filterOwnsKey(m.subs, k.String()) {
 			var cmd tea.Cmd
 			m.subs, cmd = m.subs.Update(msg)
@@ -36,11 +39,79 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if wrapListKey(&m.subs, k.String()) {
 			return m, nil
 		}
-		if m.movingSub != "" {
+		if len(m.movingSubs) > 0 {
 			return m.updateMoveSub(k)
 		}
 		sel, _ := m.subs.SelectedItem().(item)
 		folder, isFolder := strings.CutPrefix(sel.id, folderRowPrefix)
+		switch k.String() {
+		case "K", "shift+up":
+			return m.reorderSub(sel.id, -1)
+		case "J", "shift+down":
+			return m.reorderSub(sel.id, 1)
+		case "ctrl+a":
+			m.toggleVisibleSubs()
+			return m, nil
+		case " ":
+			if sel.id != "" && !isFolder {
+				if m.checkedSubs == nil {
+					m.checkedSubs = make(map[string]bool)
+				}
+				if m.checkedSubs[sel.id] {
+					delete(m.checkedSubs, sel.id)
+				} else {
+					m.checkedSubs[sel.id] = true
+				}
+				m.reloadSubs()
+				m.focusSub(sel.id)
+			}
+			return m, nil
+		case "m":
+			return m.startSubMove(sel.id)
+		case "s":
+			m.subFocus = sel.id
+			m.subReturnFilter = m.subs.FilterValue()
+			m.sortSubs = true
+			m.subs.ResetFilter()
+			m.reloadSubs()
+			m.focusSub(m.settings.SubscriptionSort)
+			return m, nil
+		case "t":
+			m.subFocus = sel.id
+			tree := !m.settings.SubscriptionTree
+			if tree {
+				m.revealSubFolder(m.subFolder)
+			} else {
+				m.subFolder = m.subParent(sel.id)
+			}
+			return m.savePreference(subDisplayPreference, func(s *config.Settings) { s.SubscriptionTree = tree })
+		case "esc":
+			if len(m.checkedSubs) > 0 && (m.subTree() || m.subFolder == "") {
+				clear(m.checkedSubs)
+				m.reloadSubs()
+				return m, nil
+			}
+		}
+		if m.subTree() {
+			switch k.String() {
+			case "left", "right":
+				m.treeArrow(sel, k.String())
+				return m, nil
+			case "enter":
+				if isFolder {
+					m.toggleBranch(folder)
+					return m, nil
+				}
+			case "a", "i", "n", "f":
+				m.subFolder = m.subParent(sel.id)
+				if isFolder {
+					m.subFolder = folder
+					m.revealSubFolder(folder)
+				}
+			case "esc", "backspace":
+				return m.switchScreen(screenDashboard)
+			}
+		}
 		if isFolder {
 			switch k.String() {
 			case "enter":
@@ -48,20 +119,13 @@ func (m Model) updateSubs(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "d":
 				return m.deleteSubFolder(folder)
-			case "e", "u", "m":
+			case "e", "u":
 				return m, nil
 			}
 		}
 		switch k.String() {
 		case "f":
 			return m.openAddForm(addSubGroup)
-		case "m":
-			if sel.id != "" {
-				m.moveFromFolder = m.subFolder
-				m.movingSub = sel.id
-				m.openSubFolder(m.subFolder)
-			}
-			return m, nil
 		case "a":
 			return m.openAddForm(addSub)
 		case "i":

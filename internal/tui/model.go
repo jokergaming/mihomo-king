@@ -15,7 +15,6 @@ import (
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
 	"mihomo-king/internal/core"
-	"mihomo-king/internal/subscription"
 )
 
 type screen int
@@ -83,20 +82,25 @@ type Model struct {
 	pwInput    textinput.Model
 
 	// subscriptions
-	subFolder      string
-	movingSub      string
-	moveFromFolder string
-	subs           list.Model
-	addForm        addForm
-	addStage       int // field of the open form being edited: 0 = first, 1 = second
-	editingSub     bool
-	editID         string
-	editSource     string
-	editLocal      bool
-	editStage      int
-	updatePrompt   string
-	nameInput      textinput.Model
-	urlInput       textinput.Model // url, node link or file path
+	subFolder       string
+	movingSubs      map[string]bool
+	checkedSubs     map[string]bool
+	expandedSubs    map[string]bool
+	sortSubs        bool
+	subFocus        string
+	subReturnFilter string
+	moveFromFolder  string
+	subs            list.Model
+	addForm         addForm
+	addStage        int // field of the open form being edited: 0 = first, 1 = second
+	editingSub      bool
+	editID          string
+	editSource      string
+	editLocal       bool
+	editStage       int
+	updatePrompt    string
+	nameInput       textinput.Model
+	urlInput        textinput.Model // url, node link or file path
 
 	// nodes
 	groups         []api.Group
@@ -134,6 +138,7 @@ type coreDownload struct {
 
 // item is a generic list row. id holds the underlying name (title may be decorated).
 type item struct {
+	order int
 	title string
 	desc  string
 	id    string
@@ -294,8 +299,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		msg.apply(m.settings)
+		if msg.key == subDisplayPreference {
+			wasSorting := m.sortSubs
+			m.sortSubs = false
+			m.reloadSubs()
+			if wasSorting {
+				m.restoreSubFilter()
+			}
+			m.focusSub(m.subFocus)
+			m.setStatus("view settings saved")
+			return m, nil
+		}
 		if msg.key == subGroupPreference {
-			m.movingSub = ""
+			if len(m.movingSubs) > 0 {
+				m.revealSubFolder(m.subFolder)
+				clear(m.checkedSubs)
+				m.movingSubs = nil
+			}
 			m.addForm = addNone
 			m.reloadSubs()
 			m.setStatus("group saved")
@@ -673,7 +693,9 @@ func (m Model) screenHelp() string {
 	switch m.screen {
 	case screenSubs:
 		switch {
-		case m.movingSub != "":
+		case m.sortSubs:
+			return m.tr("↑/↓ choose · enter save · esc cancel")
+		case len(m.movingSubs) > 0:
 			return m.tr("enter open group · backspace up · v move here · esc cancel")
 		case m.updatePrompt != "":
 			return m.tr("y update now · n keep current · esc keep current")
@@ -689,7 +711,11 @@ func (m Model) screenHelp() string {
 		if m.subs.FilterState() == list.Filtering {
 			return m.tr("type to filter · enter apply · esc cancel")
 		}
-		return m.tr("f new group · m move · enter open/activate · esc back · a add sub · i import · n add node · e edit · u update · d delete · / filter")
+		help := m.tr("space select · ctrl+a all · m move · t view · s sort · K/J reorder · f new group · / filter")
+		if m.subTree() {
+			help += " · " + m.tr("←/→ collapse/expand")
+		}
+		return help + " · " + m.tr("a add · i import · n node · e edit · u update · d delete · enter open")
 	case screenNodes:
 		if m.editingTestURL {
 			return m.tr("enter save url · esc cancel")
@@ -775,58 +801,6 @@ func wrapListKey(l *list.Model, key string) bool {
 		}
 	}
 	return false
-}
-
-func (m Model) subRows() []list.Item {
-	items := make([]list.Item, 0, len(m.settings.Subscriptions)+len(m.settings.LocalNodes))
-	for _, sub := range m.settings.Subscriptions {
-		defaultFolder := ""
-		if sub.Path != "" {
-			defaultFolder = fileSubFolder
-		}
-		if m.movingSub != "" || entryFolder(sub.ViewGroup, defaultFolder) != m.subFolder {
-			continue
-		}
-		source := sub.URL
-		if sub.Path != "" {
-			source = m.tr("file · ") + sub.Path
-		}
-		desc := source
-		if info := subscription.FormatUserInfoWith(sub.UserInfo, m.tr); info != "" {
-			desc = info + "  ·  " + source
-		}
-		if sub.NoNodes {
-			desc = m.tr("no usable nodes  ·  ") + desc
-		}
-		if sub.NeedsUpdate {
-			desc = m.tr("! update needed  ·  ") + desc
-		}
-		title := sub.Name
-		if sub.Name == m.settings.Active {
-			title = "● " + sub.Name + m.tr(" (active)")
-		}
-		items = append(items, item{title: title, desc: desc, id: sub.Name})
-	}
-	for _, node := range m.settings.LocalNodes {
-		if m.movingSub != "" || entryFolder(node.ViewGroup, nodeSubFolder) != m.subFolder {
-			continue
-		}
-		items = append(items, item{
-			title: m.tr("Local / ") + node.Name,
-			desc:  m.tr("local node · ") + node.Link,
-			id:    localRowPrefix + node.Name,
-		})
-	}
-	return m.appendSubFolders(items)
-}
-
-func (m *Model) reloadSubs() {
-	m.subs.Title = m.subFolderTitle()
-	previous := m.subs
-	m.subs.SetItems(m.subRows())
-	if previous.FilterState() != list.Unfiltered {
-		restoreListState(&m.subs, previous)
-	}
 }
 
 func (m *Model) setStatus(key string, args ...any) { m.setTextStatus(message(key, args...)) }
