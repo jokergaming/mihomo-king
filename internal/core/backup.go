@@ -142,6 +142,11 @@ func changeBinary(ctx context.Context, s *config.Settings, tool, channel string,
 	if path, e := installPath(s, tool, other); e == nil && path == dest {
 		return nil, fmt.Errorf("stable and alpha share %s; configure separate paths", dest)
 	}
+	if active := s.Tool(); active != tool {
+		if path, e := installPath(s, active, s.Channel(active)); e == nil && path == dest {
+			return nil, fmt.Errorf("%s and %s share %s; configure separate binary paths", tool, active, dest)
+		}
+	}
 	if s.CoreBackupCount < 0 {
 		return nil, fmt.Errorf("core backup count must be non-negative")
 	}

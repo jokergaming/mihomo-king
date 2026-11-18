@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -92,6 +94,9 @@ func TestCustomBackupRootAcrossFilesystems(t *testing.T) {
 func TestMain(m *testing.M) {
 	if addr := os.Getenv("MIHOMO_KING_TEST_CONTROLLER"); addr != "" && len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "version":
+			fmt.Println("Xray 1.2.3")
+			os.Exit(0)
 		case "-v":
 			fmt.Println("Mihomo Meta v1.0.0")
 			os.Exit(0)
@@ -107,7 +112,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func TestRestartFailureRestoresRunningCore(t *testing.T) {
+func startTestMihomo(t *testing.T) *config.Settings {
+	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	s, err := config.Load()
@@ -149,9 +155,72 @@ func TestRestartFailureRestoresRunningCore(t *testing.T) {
 			}
 		}
 	})
+	return s
+}
+
+func TestDownloadXrayKeepsMihomoRunning(t *testing.T) {
+	s := startTestMihomo(t)
+	_, pid := mihomo.Running(s)
+	dir := t.TempDir()
+	s.XrayBin = filepath.Join(dir, "xray")
+	body, err := os.ReadFile(s.Binary())
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive := zipBytes(t, "xray", body)
+	arch := "64"
+	if runtime.GOARCH == "arm64" {
+		arch = "arm64-v8a"
+	}
+	releases := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/XTLS/Xray-core/releases":
+			fmt.Fprintf(w, `[{"tag_name":"v1.2.3","assets":[{"name":"Xray-%s-%s.zip","browser_download_url":"http://%s/xray.zip"}]}]`, runtime.GOOS, arch, r.Host)
+		case "/xray.zip":
+			w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer releases.Close()
+	original := githubAPI
+	githubAPI = releases.URL
+	defer func() { githubAPI = original }()
+	for name, script := range map[string]string{"sudo": "exit 0", "setcap": "exit 0", "getcap": "echo cap_net_admin,cap_net_raw=ep"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+script+"\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	res, err := Install(t.Context(), s, "xray", "stable", "test", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Dest != s.XrayBin || res.Version != "Xray 1.2.3" || res.Stopped || res.Restarted {
+		t.Fatalf("unexpected install: %+v", res)
+	}
+	if ok, after := mihomo.Running(s); !ok || after != pid {
+		t.Fatalf("mihomo PID changed: %d -> %d", pid, after)
+	}
+	resp, err := http.Get("http://" + s.Controller + "/version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("controller: %s", resp.Status)
+	}
+	s.XrayBin = s.Binary()
+	if _, err := Restore(t.Context(), s, "xray", "stable", "", true); err == nil || !strings.Contains(err.Error(), "share") {
+		t.Fatalf("overlapping target: %v", err)
+	}
+}
+
+func TestRestartFailureRestoresRunningCore(t *testing.T) {
+	s := startTestMihomo(t)
 	_, oldPID := mihomo.Running(s)
 	s.CoreBackupCount = 0
-	_, err = changeBinary(t.Context(), s, "mihomo", s.Channel("mihomo"), true, func(stage string, _ *Result) error {
+	_, err := changeBinary(t.Context(), s, "mihomo", s.Channel("mihomo"), true, func(stage string, _ *Result) error {
 		return os.WriteFile(stage, []byte("#!/bin/sh\ncase \"$1\" in -v) echo v2;; -t) exit 0;; *) exit 2;; esac\n"), 0700)
 	})
 	if err == nil || !strings.Contains(err.Error(), "restored and restarted") {

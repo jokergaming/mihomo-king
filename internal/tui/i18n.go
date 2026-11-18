@@ -113,7 +113,7 @@ func (m *Model) refreshLanguage() {
 		m.urlInput.Placeholder = "https://example.com/sub.yaml"
 	}
 	m.pwInput.Placeholder = m.tr("sudo password")
-	if m.editingSetting && m.settingKey != settingCoreGet && m.settingKey != settingGeoGet {
+	if m.editingSetting && m.settingKey != settingGeoGet {
 		m.settingInput.Placeholder = m.settingLabel(m.settingKey)
 	}
 }

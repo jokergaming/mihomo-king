@@ -25,31 +25,31 @@ import (
 )
 
 const (
-	settingTool              = "managed_tool"
-	settingMihomoBin         = "mihomo_bin"
-	settingSingBoxBin        = "sing_box_bin"
-	settingXrayBin           = "xray_bin"
-	settingCoreGet           = "core_download"
-	settingCoreRestore       = "core_restore"
-	settingDeleteBackup      = "delete_core_backup"
-	settingDeleteBackups     = "delete_all_core_backups"
-	settingCoreBackups       = "core_backup_count"
-	settingBackupRoot        = "core_backup_root"
-	settingCoreChannel       = "core_channel"
-	settingCoreSource        = "core_release_url"
-	settingCoreReminders     = "core_update_reminders"
-	settingCoreInterval      = "core_update_interval"
-	settingGeoGet            = "geo_download"
-	settingController        = "controller"
-	settingMixedPort         = "mixed_port"
-	settingTunDevice         = "tun_device"
-	settingTunAddress        = "tun_address"
-	settingTestURL           = "test_url"
-	settingMode              = "mode"
-	settingLogLevel          = "log_level"
-	settingAutostart         = "autostart"
-	settingDashboardLatency  = "dashboard_latency_enabled"
-	settingDashboardInterval = "dashboard_latency_interval"
+	settingTool               = "managed_tool"
+	settingMihomoBin          = "mihomo_bin"
+	settingSingBoxBin         = "sing_box_bin"
+	settingXrayBin            = "xray_bin"
+	settingCoreDownloadPrefix = "core_download_"
+	settingCoreRestore        = "core_restore"
+	settingDeleteBackup       = "delete_core_backup"
+	settingDeleteBackups      = "delete_all_core_backups"
+	settingCoreBackups        = "core_backup_count"
+	settingBackupRoot         = "core_backup_root"
+	settingCoreChannel        = "core_channel"
+	settingCoreSource         = "core_release_url"
+	settingCoreReminders      = "core_update_reminders"
+	settingCoreInterval       = "core_update_interval"
+	settingGeoGet             = "geo_download"
+	settingController         = "controller"
+	settingMixedPort          = "mixed_port"
+	settingTunDevice          = "tun_device"
+	settingTunAddress         = "tun_address"
+	settingTestURL            = "test_url"
+	settingMode               = "mode"
+	settingLogLevel           = "log_level"
+	settingAutostart          = "autostart"
+	settingDashboardLatency   = "dashboard_latency_enabled"
+	settingDashboardInterval  = "dashboard_latency_interval"
 )
 
 type backupsMsg struct {
@@ -118,9 +118,6 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	sel, ok := m.settingsList.SelectedItem().(item)
 	if !ok {
 		return m, nil
-	}
-	if sel.id == settingCoreGet {
-		return m.beginCoreDownload()
 	}
 	if sel.id == settingDeleteBackups {
 		s := *m.settings
@@ -270,10 +267,10 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m.savePreference(m.settingKey, func(s *config.Settings) { s.CoreUpdateInterval = raw })
 			}
-			if m.settingKey == settingCoreGet {
-				tool, channel, err := parseCoreDownload(m.settingInput.Value())
-				if err != nil {
-					m.setError(err)
+			if tool, ok := strings.CutPrefix(m.settingKey, settingCoreDownloadPrefix); ok {
+				channel := strings.TrimSpace(m.settingInput.Value())
+				if !core.ValidChannel(channel) {
+					m.setErr("choose one of: %s", strings.Join(core.Channels(), ", "))
 					return m, nil
 				}
 				m.editingSetting = false
@@ -319,6 +316,9 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) settingValue(key string) string {
+	if tool, ok := strings.CutPrefix(key, settingCoreDownloadPrefix); ok {
+		return m.settings.Channel(tool)
+	}
 	switch key {
 	case settingBackupRoot:
 		return m.settings.CoreBackupRoot
@@ -410,10 +410,12 @@ func (m *Model) reloadSettings() {
 	if err != nil {
 		dir = err.Error()
 	}
-	rows := []list.Item{
-		item{title: m.tr("download core"), desc: m.tr("stable or alpha · replaces the configured binary · tab to choose"), id: settingCoreGet},
-		item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders},
+	var rows []list.Item
+	for _, target := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {
+		channel := m.settings.Channel(target)
+		rows = append(rows, item{title: m.tr("download %s", target), desc: channel + " · " + m.settings.CoreBinary(target, channel), id: settingCoreDownloadPrefix + target})
 	}
+	rows = append(rows, item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders})
 	if m.settings.CoreUpdateReminders {
 		rows = append(rows, item{title: m.tr("core update check interval"), desc: m.settingValue(settingCoreInterval), id: settingCoreInterval})
 	}
@@ -477,6 +479,9 @@ func (m Model) viewSettings() string {
 }
 
 func (m Model) settingOptions(key string) []string {
+	if strings.HasPrefix(key, settingCoreDownloadPrefix) {
+		return core.Channels()
+	}
 	switch key {
 	case settingCoreRestore, settingDeleteBackup:
 		return m.backups
@@ -484,8 +489,6 @@ func (m Model) settingOptions(key string) []string {
 		return config.Modes(m.settings.Tool())
 	case settingLogLevel:
 		return config.LogLevels(m.settings.Tool())
-	case settingCoreGet:
-		return coreDownloadOptions()
 	case settingGeoGet:
 		return geoDownloadOptions()
 	default:
@@ -509,8 +512,6 @@ func (m Model) settingPrompt(key string) string {
 		return m.tr("core update check interval (e.g. 1d, 12h or 30m)")
 	case settingDashboardInterval:
 		return m.tr("latency refresh interval (e.g. 10s or 1m, minimum 1s)")
-	case settingCoreGet:
-		return m.tr("core channel (tab cycles mihomo/sing-box/xray and stable/alpha)")
 	case settingGeoGet:
 		return m.tr("cores (tab cycles one core or all; one Loyalsoldier download is shared)")
 	}
@@ -580,15 +581,6 @@ func (m Model) updateCoreCapPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) beginCoreDownload() (tea.Model, tea.Cmd) {
-	m.editingSetting = true
-	m.settingKey = settingCoreGet
-	m.settingInput.Placeholder = m.settings.Tool() + " " + m.settings.Channel(m.settings.Tool())
-	m.settingInput.SetValue(m.settingInput.Placeholder)
-	m.settingInput.CursorEnd()
-	return m, m.settingInput.Focus()
-}
-
 func (m Model) beginGeoDownload() (tea.Model, tea.Cmd) {
 	m.editingSetting = true
 	m.settingKey = settingGeoGet
@@ -628,27 +620,6 @@ func (m Model) geoStatus(s *config.Settings) string {
 		return m.tr("Loyalsoldier geoip · one download, shared by every core · not installed")
 	}
 	return m.tr("Loyalsoldier geoip · installed for ") + strings.Join(present, ", ")
-}
-
-func coreDownloadOptions() []string {
-	var options []string
-	for _, tool := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {
-		for _, channel := range core.Channels() {
-			options = append(options, tool+" "+channel)
-		}
-	}
-	return options
-}
-
-func parseCoreDownload(raw string) (string, string, error) {
-	tool, channel, ok := strings.Cut(strings.TrimSpace(raw), " ")
-	if !ok || !core.ValidChannel(channel) {
-		return "", "", message("choose one of: %s", strings.Join(coreDownloadOptions(), ", "))
-	}
-	if _, err := core.SpecFor(tool); err != nil {
-		return "", "", err
-	}
-	return tool, channel, nil
 }
 
 func nextSettingOption(current string, options []string) string {
