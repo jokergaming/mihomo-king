@@ -68,7 +68,15 @@ func (s *Settings) XrayActiveDelay(testURL string, timeout time.Duration) (int, 
 		return 0, fmt.Errorf("invalid Xray mixed port: %d", s.MixedPort)
 	}
 	proxyURL := &url.URL{Scheme: "http", Host: fmt.Sprintf("127.0.0.1:%d", s.MixedPort)}
-	transport := &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+	return httpDelay(testURL, timeout, &http.Transport{Proxy: http.ProxyURL(proxyURL)})
+}
+
+// DirectHTTPDelay tests the host route without using a configured HTTP proxy.
+func DirectHTTPDelay(testURL string, timeout time.Duration) (int, error) {
+	return httpDelay(testURL, timeout, &http.Transport{})
+}
+
+func httpDelay(testURL string, timeout time.Duration, transport *http.Transport) (int, error) {
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: timeout}
 	start := time.Now()

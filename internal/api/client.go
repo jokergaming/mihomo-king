@@ -3,13 +3,14 @@ package api
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 )
@@ -113,6 +114,11 @@ func (c *Client) Groups() ([]Group, error) {
 	if err != nil {
 		return nil, err
 	}
+	return OrderedGroups(proxies), nil
+}
+
+// OrderedGroups lists the groups in a runtime snapshot in controller order.
+func OrderedGroups(proxies map[string]Proxy) []Group {
 	order := map[string]int{}
 	if g, ok := proxies["GLOBAL"]; ok {
 		for i, name := range g.All {
@@ -126,18 +132,21 @@ func (c *Client) Groups() ([]Group, error) {
 		}
 		groups = append(groups, Group{Name: name, Type: p.Type, Now: p.Now, All: p.All})
 	}
-	sort.Slice(groups, func(i, j int) bool {
-		oi, iok := order[groups[i].Name]
-		oj, jok := order[groups[j].Name]
+	slices.SortFunc(groups, func(a, b Group) int {
+		oi, iok := order[a.Name]
+		oj, jok := order[b.Name]
 		if iok && jok {
-			return oi < oj
+			return cmp.Compare(oi, oj)
 		}
-		if iok != jok {
-			return iok
+		if iok {
+			return -1
 		}
-		return groups[i].Name < groups[j].Name
+		if jok {
+			return 1
+		}
+		return cmp.Compare(a.Name, b.Name)
 	})
-	return groups, nil
+	return groups
 }
 
 // SelectNode picks node within a Selector group (PUT /proxies/{group}).

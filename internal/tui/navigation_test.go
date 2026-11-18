@@ -18,6 +18,8 @@ func TestDashboardStartsAtTopAndScrollsWholePage(t *testing.T) {
 	}
 	const height = 12
 	m, _ = press(m, tea.WindowSizeMsg{Width: 120, Height: height})
+	collapsed := m.View()
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	top := m.View()
 	if lipgloss.Height(top) != height || !strings.Contains(top, "1 Dashboard") || !strings.Contains(top, "route-00") || strings.Contains(top, "route-39") {
 		t.Fatalf("unexpected initial dashboard:\n%s", top)
@@ -41,7 +43,7 @@ func TestDashboardStartsAtTopAndScrollsWholePage(t *testing.T) {
 	m, _ = press(m, keyRunes("G"))
 	m, _ = press(m, keyRunes("2"))
 	m, _ = press(m, keyRunes("1"))
-	if got := m.View(); got != top {
+	if got := m.View(); got != collapsed {
 		t.Fatalf("returning to dashboard did not start at the top:\n%s", got)
 	}
 }

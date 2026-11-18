@@ -114,12 +114,18 @@ func refreshStatusCmd(settings *config.Settings) tea.Cmd {
 						msg.tun = mihomo.TunEnabled(s, cfg.Tun.Enable)
 					}
 					if cfg.Mode == "direct" {
-						msg.nodes = proxyNodeRoutes(nil, cfg.Mode)
+						msg.nodes = proxyNodeRoutes(nil, cfg.Mode, "")
 					} else {
 						proxies, err := c.Proxies()
 						msg.nodeErr = err
 						if err == nil {
-							msg.nodes = proxyNodeRoutes(proxies, cfg.Mode)
+							var primary string
+							if s.Tool() == config.ToolSingBox && cfg.Mode != "global" {
+								primary, msg.nodeErr = singBoxFinal(s.ConfigPath())
+							}
+							if msg.nodeErr == nil {
+								msg.nodes = proxyNodeRoutes(proxies, cfg.Mode, primary)
+							}
 						}
 					}
 				} else {

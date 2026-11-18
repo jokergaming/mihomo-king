@@ -24,17 +24,21 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - Test node and group latency with a configurable test URL.
 
 The dashboard shows runtime node selections and protocols, following nested
-groups to their final nodes. Rule mode lists each group's selection, global mode
+groups to their final nodes. Rule mode shows the primary group (the first configured
+group for mihomo, the final outbound for sing-box). Press `Enter` to expand or
+collapse the other rules. Global mode
 shows `GLOBAL`, and direct mode shows `DIRECT`. Press `R` to restart the managed
 core (or start it if stopped), and `r` to refresh. Status refreshes every 3 seconds.
 Opening the dashboard or pressing `r` tests the selected nodes with the configured
-test URL and displays latency in milliseconds. Shared nodes are tested once.
+test URL (Google by default) and shows direct latency to the same URL. Other rules
+are tested while expanded. Shared nodes are tested once per round.
 In **Settings → Latency tests**, **dashboard latency** controls whether latency is shown and tested
 (on by default), and **latency refresh interval** sets automatic testing while
 the dashboard is open (default `10s`; accepts durations such as `30s` or `1m`,
 minimum `1s`). Both preferences persist across restarts. A new round waits for
 the previous round to finish; leaving the dashboard stops automatic testing.
-Direct/reject routes and load-balanced groups have no single proxy latency to show.
+Mihomo and sing-box measure direct latency through the core’s `DIRECT` outbound.
+Xray uses a host HTTP connection for the direct probe, following the OS routing table.
 
 ### Interface language
 

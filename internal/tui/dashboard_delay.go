@@ -41,26 +41,34 @@ func (m *Model) beginDashboardDelays() tea.Cmd {
 	}
 	m.dashboardDelays = make(map[string]dashboardDelayMsg)
 	m.dashboardDelayNext = time.Now().Add(m.settings.DashboardLatencyInterval)
+	return m.scheduleVisibleDelays()
+}
+
+func (m *Model) scheduleVisibleDelays() tea.Cmd {
+	if m.dashboardDelays == nil {
+		return nil
+	}
 	// Capture settings before commands run; UI edits must not change an in-flight test.
 	s := *m.settings
 	epoch := m.dashboardDelayEpoch
 	client := api.New(s.Controller, s.Secret)
-	seen := make(map[string]bool)
 	sem := make(chan struct{}, 4)
 	var cmds []tea.Cmd
-	for _, route := range m.liveNodes {
+	for _, route := range m.visibleDashboardNodes() {
 		node := route.target
-		if node == "" || seen[node] {
+		if _, scheduled := m.dashboardDelays[node]; node == "" || scheduled {
 			continue
 		}
-		seen[node] = true
+		m.dashboardDelays[node] = dashboardDelayMsg{}
 		m.dashboardDelayPending++
 		cmds = append(cmds, func() tea.Msg {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			var delay int
 			var err error
-			if s.Tool() == config.ToolXray {
+			if s.Tool() == config.ToolXray && node == directTarget {
+				delay, err = config.DirectHTTPDelay(s.TestURL, 5*time.Second)
+			} else if s.Tool() == config.ToolXray {
 				runtimeSettings := s
 				runtimeSettings.MixedPort = route.proxyPort
 				delay, err = runtimeSettings.XrayActiveDelay(s.TestURL, 5*time.Second)
@@ -78,7 +86,7 @@ func (m Model) dashboardDelayLabel(node string) string {
 		return ""
 	}
 	result, ok := m.dashboardDelays[node]
-	if !ok {
+	if !ok || result.node == "" {
 		return "  ·  " + dimStyle.Render(m.tr("latency: testing…"))
 	}
 	if result.err != nil {

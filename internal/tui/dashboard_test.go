@@ -29,12 +29,12 @@ func TestDashboardNodeRoutes(t *testing.T) {
 		mode string
 		want []string
 	}{
-		{"rule", []string{"Auto → HK (Shadowsocks)", "Proxy → Auto → HK (Shadowsocks)"}},
+		{"rule", []string{"Proxy → Auto → HK (Shadowsocks)", "Auto → HK (Shadowsocks)"}},
 		{"global", []string{"GLOBAL → Proxy → Auto → HK (Shadowsocks)"}},
 		{"direct", []string{"DIRECT"}},
 	} {
 		t.Run(tt.mode, func(t *testing.T) {
-			if got := renderedRoutes(proxyNodeRoutes(proxies, tt.mode)); !slices.Equal(got, tt.want) {
+			if got := renderedRoutes(proxyNodeRoutes(proxies, tt.mode, "")); !slices.Equal(got, tt.want) {
 				t.Fatalf("routes = %v, want %v", got, tt.want)
 			}
 		})
@@ -104,7 +104,7 @@ func TestDashboardRefreshTracksRuntimeSelectionAndErrors(t *testing.T) {
 		var cmd tea.Cmd
 		m, cmd = press(m, msg)
 		if cmd != nil {
-			m, _ = press(m, cmd())
+			m, _ = press(m, summaryProbe(t, cmd))
 		}
 	}
 	refresh()

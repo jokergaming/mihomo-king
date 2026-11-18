@@ -53,6 +53,16 @@ func (m Model) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, toggleTunCmd(m.settings, false)
 		}
 		return m.beginTunEnable()
+	case "enter":
+		if m.running && m.nodeErr == nil && len(m.liveNodes) > 1 {
+			m.dashboardExpanded = !m.dashboardExpanded
+			if m.dashboardExpanded {
+				cmd := m.scheduleVisibleDelays()
+				return m, cmd
+			}
+			m.dashboardOffset = m.dashboardViewport().YOffset
+		}
+		return m, nil
 	case "r":
 		m.setStatus("refreshing…")
 		return m.refreshDashboard()
@@ -195,15 +205,22 @@ func (m Model) viewDashboard() string {
 		row(m.tr("nodes"), dimStyle.Render(m.tr("(not running)")))
 	case m.nodeErr != nil:
 		row(m.tr("nodes"), errStyle.Render(m.tr("unavailable: %s", m.nodeErr.Error())))
-	case len(m.liveNodes) == 0:
+	case len(m.liveNodes) == 0 && !m.settings.DashboardLatencyEnabled:
 		row(m.tr("nodes"), dimStyle.Render(m.tr("(no active proxy groups)")))
 	default:
-		for i, node := range m.liveNodes {
+		for i, node := range m.visibleDashboardNodes() {
 			label := ""
 			if i == 0 {
 				label = m.tr("nodes")
 			}
 			row(label, m.render(node.text)+m.dashboardDelayLabel(node.target))
+		}
+		if n := len(m.liveNodes) - 1; n > 0 {
+			hint := m.tr("Enter to show other rules (%d)", n)
+			if m.dashboardExpanded {
+				hint = m.tr("Enter to hide other rules (%d)", n)
+			}
+			row("", dimStyle.Render(hint))
 		}
 	}
 	row(m.tr("controller"), m.settings.Controller)

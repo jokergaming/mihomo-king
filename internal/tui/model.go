@@ -68,6 +68,7 @@ type Model struct {
 	foreignTun            []string
 	liveNodes             []dashboardNode
 	nodeErr               error
+	dashboardExpanded     bool
 	dashboardOffset       int
 	coreBusy              bool
 	dashboardDelayEpoch   uint64
@@ -252,7 +253,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dashboardDelayMsg:
 		if msg.epoch == m.dashboardDelayEpoch && m.dashboardDelays != nil && m.settings.DashboardLatencyEnabled {
-			if _, received := m.dashboardDelays[msg.node]; received {
+			if pending, ok := m.dashboardDelays[msg.node]; !ok || pending.node != "" {
 				return m, nil
 			}
 			m.dashboardDelays[msg.node] = msg
@@ -264,7 +265,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case dashboardDelayTickMsg:
-		if msg.epoch != m.dashboardDelayEpoch || m.screen != screenDashboard || !m.settings.DashboardLatencyEnabled || !m.running {
+		if msg.epoch != m.dashboardDelayEpoch || m.dashboardDelayPending > 0 || m.screen != screenDashboard || !m.settings.DashboardLatencyEnabled || !m.running {
 			return m, nil
 		}
 		return m.refreshDashboard()
@@ -617,6 +618,7 @@ func (m *Model) jumpToEdge(bottom bool) {
 // switchScreen activates a screen and kicks off its data refresh.
 func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 	if m.screen == screenDashboard && s != screenDashboard {
+		m.dashboardExpanded = false
 		m.clearDashboardDelays()
 	}
 	m.screen = s

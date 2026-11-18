@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -19,6 +20,66 @@ import (
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
 )
+
+// Run the first (selected route) request from a summary's two-probe batch.
+func summaryProbe(t *testing.T, cmd tea.Cmd) dashboardDelayMsg {
+	t.Helper()
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("expected selected route and direct probes, got %v", batch)
+	}
+	return batch[0]().(dashboardDelayMsg)
+}
+
+func TestDashboardFoldsOtherRuleProbes(t *testing.T) {
+	const url = "https://www.gstatic.com/generate_204"
+	var requested []string
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("url") != url {
+			t.Errorf("unexpected test URL %q", r.URL.RawQuery)
+		}
+		requested = append(requested, r.URL.Path)
+		fmt.Fprint(w, `{"delay":12}`)
+	}))
+	defer controller.Close()
+	m := Model{settings: &config.Settings{TestURL: url, Controller: controller.URL, DashboardLatencyEnabled: true}}
+	proxies := map[string]api.Proxy{
+		"GLOBAL": {All: []string{"Main", "Audio", "Video"}},
+		"Main":   {Now: "HK", All: []string{"HK"}},
+		"Audio":  {Now: "JP", All: []string{"JP"}},
+		"Video":  {Now: "JP", All: []string{"JP"}},
+		"HK":     {Type: "SS"}, "JP": {Type: "SS"},
+	}
+	snapshot := statusMsg{running: true, nodes: proxyNodeRoutes(proxies, "rule", "")}
+	m, cmd := press(m, snapshot)
+	for _, probe := range cmd().(tea.BatchMsg) {
+		m, _ = press(m, probe())
+	}
+	if got := m.viewDashboard(); strings.Contains(got, "Audio") || !strings.Contains(got, "Main → HK") || strings.Count(got, "12 ms") != 2 {
+		t.Fatal(got)
+	}
+	enter := tea.KeyMsg{Type: tea.KeyEnter}
+	m, cmd = press(m, enter)
+	if cmd == nil {
+		t.Fatal("expanding did not start the hidden proxy test")
+	}
+	m, _ = press(m, cmd())
+	if got := m.viewDashboard(); !strings.Contains(got, "Audio → JP") || !strings.Contains(got, "Video → JP") || strings.Count(got, "12 ms") != 4 {
+		t.Fatal(got)
+	}
+	m, cmd = press(m, enter)
+	if cmd != nil || strings.Contains(m.viewDashboard(), "Audio") {
+		t.Fatal("collapse did not hide the other routes")
+	}
+	if !slices.Equal(requested, []string{"/proxies/HK/delay", "/proxies/DIRECT/delay", "/proxies/JP/delay"}) {
+		t.Fatalf("requests = %v", requested)
+	}
+	m, _ = m.refreshDashboard()
+	m, _ = press(m, snapshot)
+	if _, ok := m.dashboardDelays["JP"]; ok {
+		t.Fatal("collapsed refresh scheduled a hidden node")
+	}
+}
 
 func TestDashboardDelayPeriodicRefresh(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -38,7 +99,7 @@ func TestDashboardDelayPeriodicRefresh(t *testing.T) {
 		if cmd != nil {
 			t.Fatal("timer scheduled before every node completed")
 		}
-		m, cmd = press(m, dashboardDelayMsg{epoch: epoch, node: "JP", err: errors.New("timeout")})
+		m, cmd = press(m, dashboardDelayMsg{epoch: epoch, node: directTarget, err: errors.New("timeout")})
 		if cmd == nil {
 			t.Fatal("last result did not schedule refresh")
 		}
@@ -64,7 +125,7 @@ func TestDashboardDelayPeriodicRefresh(t *testing.T) {
 		}
 		epoch = m.dashboardDelayEpoch
 		m, _ = press(m, dashboardDelayMsg{epoch: epoch, node: "HK", delay: 50})
-		m, cmd = press(m, dashboardDelayMsg{epoch: epoch, node: "JP", delay: 60})
+		m, cmd = press(m, dashboardDelayMsg{epoch: epoch, node: directTarget, delay: 60})
 		if cmd == nil {
 			t.Fatal("slow test did not schedule next round")
 		}
@@ -110,19 +171,18 @@ func TestDashboardDelayRefreshLifecycle(t *testing.T) {
 		"Auto":   {Type: "URLTest", Now: "HK/one", All: []string{"HK/one"}},
 		"HK/one": {Type: "SS"},
 	}
-	snapshot := statusMsg{running: true, pid: 42, nodes: proxyNodeRoutes(proxies, "rule")}
+	snapshot := statusMsg{running: true, pid: 42, nodes: proxyNodeRoutes(proxies, "rule", "")}
 	m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second, Controller: srv.URL, Secret: "secret", TestURL: "https://example.com/check?a=1&b=2"}}
 	m, cmd := press(m, snapshot)
 	if cmd == nil || !strings.Contains(m.viewDashboard(), "latency: testing…") {
 		t.Fatal("first dashboard status did not start a delay test")
 	}
-	// One command means the nested groups sharing a leaf did not duplicate requests.
-	result, ok := cmd().(dashboardDelayMsg)
-	if !ok || result.err != nil || result.delay != 123 || calls.Load() != 1 {
+	result := summaryProbe(t, cmd)
+	if result.err != nil || result.delay != 123 || calls.Load() != 1 {
 		t.Fatalf("delay test = %+v, requests = %d", result, calls.Load())
 	}
 	m, _ = press(m, result)
-	if got := m.viewDashboard(); strings.Count(got, "latency: 123 ms") != 2 {
+	if got := m.viewDashboard(); strings.Count(got, "latency: 123 ms") != 1 {
 		t.Fatalf("delay missing beside shared routes: %s", got)
 	}
 	if _, cmd := press(m, snapshot); cmd != nil {
@@ -151,7 +211,7 @@ func TestDashboardDelayRefreshLifecycle(t *testing.T) {
 			if strings.Contains(m.viewDashboard(), "123 ms") {
 				t.Fatal("late result from previous visit was accepted")
 			}
-			m, _ = press(m, cmd())
+			m, _ = press(m, summaryProbe(t, cmd))
 			if !strings.Contains(m.viewDashboard(), "123 ms") {
 				t.Fatal("fresh result was not displayed")
 			}
@@ -160,7 +220,7 @@ func TestDashboardDelayRefreshLifecycle(t *testing.T) {
 
 	proxies["Auto"] = api.Proxy{Type: "URLTest", Now: "JP", All: []string{"JP"}}
 	proxies["JP"] = api.Proxy{Type: "Trojan"}
-	snapshot.nodes = proxyNodeRoutes(proxies, "rule")
+	snapshot.nodes = proxyNodeRoutes(proxies, "rule", "")
 	m, cmd = press(m, snapshot)
 	if cmd == nil || strings.Contains(m.viewDashboard(), "123 ms") {
 		t.Fatal("changed selection retained old latency")
@@ -198,7 +258,7 @@ func TestDashboardDelayFailuresAndLanguage(t *testing.T) {
 			defer srv.Close()
 			m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second, Controller: srv.URL}}
 			m, cmd := press(m, statusMsg{running: true, nodes: []dashboardNode{{text: message("%s", "HK"), target: "HK"}}})
-			result := cmd().(dashboardDelayMsg)
+			result := summaryProbe(t, cmd)
 			if tt.status == http.StatusUnauthorized && !errors.Is(result.err, api.ErrUnauthorized) {
 				t.Fatalf("lost authorization error: %v", result.err)
 			}
@@ -234,9 +294,9 @@ func TestDashboardSkipsNonProxyRoutes(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			proxies := map[string]api.Proxy{"GLOBAL": {Now: "special", All: []string{"special"}}, "special": {Type: kind}}
 			m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second}}
-			m, cmd := press(m, statusMsg{running: true, nodes: proxyNodeRoutes(proxies, "global")})
-			if cmd != nil || strings.Contains(m.viewDashboard(), "latency:") {
-				t.Fatal("non-proxy route should not be tested")
+			m, cmd := press(m, statusMsg{running: true, nodes: proxyNodeRoutes(proxies, "global", "")})
+			if _, direct := m.dashboardDelays[directTarget]; cmd == nil || !direct || len(m.dashboardDelays) != 1 {
+				t.Fatal("expected only the direct probe")
 			}
 		})
 	}
@@ -268,7 +328,7 @@ func TestXrayDashboardDelayUsesRuntimePort(t *testing.T) {
 	m := Model{settings: &config.Settings{DashboardLatencyEnabled: true, DashboardLatencyInterval: 10 * time.Second, ManagedTool: config.ToolXray, MixedPort: 1, XrayNode: "saved-but-not-active", TestURL: "http://latency.invalid/check"}}
 	snapshot := statusMsg{running: true, nodes: routes}
 	m, cmd := press(m, snapshot)
-	result := cmd().(dashboardDelayMsg)
+	result := summaryProbe(t, cmd)
 	if result.node != "runtime-node" || result.err != nil || result.delay <= 0 {
 		t.Fatalf("runtime proxy latency: %+v", result)
 	}
@@ -276,7 +336,7 @@ func TestXrayDashboardDelayUsesRuntimePort(t *testing.T) {
 	fail.Store(true)
 	m, _ = m.refreshDashboard()
 	m, cmd = press(m, snapshot)
-	result = cmd().(dashboardDelayMsg)
+	result = summaryProbe(t, cmd)
 	if result.err == nil || !strings.Contains(result.err.Error(), "502") {
 		t.Fatalf("proxy failure was hidden by fallback: %+v", result)
 	}

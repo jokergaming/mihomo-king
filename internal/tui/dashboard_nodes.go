@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
+
 	"strings"
 
 	"mihomo-king/internal/api"
@@ -12,31 +12,60 @@ import (
 
 type dashboardNode struct {
 	text
-	target    string // concrete proxy to test; empty for non-proxy or unresolved routes
+	target    string // outbound to test; empty for blocked or unresolved routes
 	proxyPort int    // Xray's runtime mixed port
 }
 
-// Rule mode can use different nodes for different destinations, so show each
-// group's selection rather than inventing a single system-wide active node.
-func proxyNodeRoutes(proxies map[string]api.Proxy, mode string) []dashboardNode {
+const directTarget = "DIRECT"
+
+// The summary and the scheduler share the same visible routes.
+func (m Model) visibleDashboardNodes() []dashboardNode {
+	nodes := m.liveNodes
+	if !m.dashboardExpanded && len(nodes) > 1 {
+		nodes = nodes[:1]
+	}
+	if !m.settings.DashboardLatencyEnabled || (len(nodes) > 0 && nodes[0].target == directTarget) {
+		return nodes
+	}
+	direct := dashboardNode{text: message("direct connection"), target: directTarget}
+	if len(nodes) == 0 {
+		return []dashboardNode{direct}
+	}
+	visible := make([]dashboardNode, 0, len(nodes)+1)
+	visible = append(visible, nodes[0], direct)
+	return append(visible, nodes[1:]...)
+}
+
+func proxyNodeRoutes(proxies map[string]api.Proxy, mode, primary string) []dashboardNode {
 	if mode == "direct" {
-		return []dashboardNode{{text: message("%s", "DIRECT")}}
+		return []dashboardNode{{text: message("%s", directTarget), target: directTarget}}
 	}
 	if mode == "global" {
 		return []dashboardNode{proxyNodeRoute(proxies, "GLOBAL")}
 	}
-	var names []string
-	for name, p := range proxies {
-		if name != "GLOBAL" && len(p.All) > 0 {
-			names = append(names, name)
+	groups := api.OrderedGroups(proxies)
+	var routes []dashboardNode
+	if primary != "" {
+		routes = append(routes, proxyNodeRoute(proxies, primary))
+	}
+	for _, group := range groups {
+		if group.Name != primary {
+			routes = append(routes, proxyNodeRoute(proxies, group.Name))
 		}
 	}
-	slices.Sort(names)
-	routes := make([]dashboardNode, 0, len(names))
-	for _, name := range names {
-		routes = append(routes, proxyNodeRoute(proxies, name))
-	}
 	return routes
+}
+
+func singBoxFinal(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var cfg struct{ Route struct{ Final string } }
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return "", fmt.Errorf("parse sing-box runtime config: %w", err)
+	}
+	return cfg.Route.Final, nil
 }
 
 func proxyNodeRoute(proxies map[string]api.Proxy, name string) dashboardNode {
@@ -68,7 +97,9 @@ func proxyNodeRoute(proxies map[string]api.Proxy, name string) dashboardNode {
 		}
 		target := name
 		switch strings.ToLower(p.Type) {
-		case "direct", "reject", "rejectdrop", "pass":
+		case "direct":
+			target = directTarget
+		case "reject", "rejectdrop", "pass":
 			target = ""
 		}
 		return dashboardNode{text: message("%s", result), target: target}
@@ -115,7 +146,9 @@ func xrayNodeRoutes(path string) ([]dashboardNode, error) {
 		for _, outbound := range cfg.Outbounds {
 			if outbound.Tag == rule.OutboundTag {
 				target := outbound.Tag
-				if outbound.Protocol == "freedom" || outbound.Protocol == "blackhole" {
+				if outbound.Protocol == "freedom" {
+					target = directTarget
+				} else if outbound.Protocol == "blackhole" {
 					target = ""
 				}
 				return []dashboardNode{{text: message("%s", outbound.Tag+" ("+outbound.Protocol+")"), target: target, proxyPort: proxyPort}}, nil
