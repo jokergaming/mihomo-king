@@ -104,20 +104,21 @@ type Model struct {
 	chainEntry     string
 
 	// settings
-	settingsList     list.Model
-	editingSetting   bool
-	settingKey       string
-	settingInput     textinput.Model
-	coreNotice       text
-	coreUpdates      coreUpdateChecks
-	settingsSaveBusy bool
-	pendingCore      coreDownload
-	backups          []string
-	pendingDeletion  *core.BackupDeletion
-	autostartEnabled bool
-	autostartLoaded  bool
-	autostartBusy    bool
-	languageBusy     bool
+	settingsList      list.Model
+	coreDownloadsOpen bool
+	editingSetting    bool
+	settingKey        string
+	settingInput      textinput.Model
+	coreNotice        text
+	coreUpdates       coreUpdateChecks
+	settingsSaveBusy  bool
+	pendingCore       coreDownload
+	backups           []string
+	pendingDeletion   *core.BackupDeletion
+	autostartEnabled  bool
+	autostartLoaded   bool
+	autostartBusy     bool
+	languageBusy      bool
 }
 
 type coreDownload struct {
@@ -579,6 +580,9 @@ func (m Model) switchScreen(s screen) (Model, tea.Cmd) {
 	case screenNodes:
 		return m, loadGroupsCmd(m.settings)
 	case screenSettings:
+		if m.coreDownloadsOpen {
+			m.showCoreDownloads(false)
+		}
 		return m.beginAutostart(false)
 	default:
 		return m.refreshDashboard()
@@ -678,6 +682,9 @@ func (m Model) screenHelp() string {
 		}
 		if m.settingsList.FilterState() == list.Filtering {
 			return m.tr("type to filter · enter apply · esc cancel")
+		}
+		if m.coreDownloadsOpen {
+			return m.tr("enter choose channel · esc back · / filter")
 		}
 		return m.tr("enter edit/download · r refresh · / filter · tab/1/2/3/4 switch · q quit")
 	default:

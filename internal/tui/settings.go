@@ -29,6 +29,7 @@ const (
 	settingMihomoBin          = "mihomo_bin"
 	settingSingBoxBin         = "sing_box_bin"
 	settingXrayBin            = "xray_bin"
+	settingCoreDownloads      = "core_downloads"
 	settingCoreDownloadPrefix = "core_download_"
 	settingCoreRestore        = "core_restore"
 	settingDeleteBackup       = "delete_core_backup"
@@ -99,6 +100,10 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch k.String() {
 		case "esc":
+			if m.coreDownloadsOpen {
+				m.showCoreDownloads(false)
+				return m, nil
+			}
 			return m.switchScreen(screenDashboard)
 		case "enter":
 			return m.settingsEnter()
@@ -117,6 +122,10 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	sel, ok := m.settingsList.SelectedItem().(item)
 	if !ok {
+		return m, nil
+	}
+	if sel.id == settingCoreDownloads {
+		m.showCoreDownloads(true)
 		return m, nil
 	}
 	if sel.id == settingDeleteBackups {
@@ -403,23 +412,47 @@ func (m *Model) saveSettingValue(key, raw string) error {
 	return m.settings.Save()
 }
 
+func (m *Model) showCoreDownloads(open bool) {
+	m.coreDownloadsOpen = open
+	m.settingsList.ResetFilter()
+	m.reloadSettings()
+	m.settingsList.GoToStart()
+}
+
 func (m *Model) reloadSettings() {
+	previous := m.settingsList
+	var rows []list.Item
+	if m.coreDownloadsOpen {
+		m.settingsList.Title = m.tr("Core downloads")
+		for _, target := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {
+			channel := m.settings.Channel(target)
+			rows = append(rows, item{title: m.tr("download %s", target), desc: channel + " · " + m.settings.CoreBinary(target, channel), id: settingCoreDownloadPrefix + target})
+		}
+	} else {
+		m.settingsList.Title = m.tr("Settings")
+		rows = m.settingsRows()
+	}
+	m.settingsList.SetItems(rows)
+	if previous.FilterState() != list.Unfiltered {
+		restoreListState(&m.settingsList, previous)
+	}
+}
+
+func (m Model) settingsRows() []list.Item {
 	tool := m.settings.Tool()
 	spec, _ := core.SpecFor(tool)
 	dir, err := core.BackupDir(m.settings, tool, m.settings.Channel(tool))
 	if err != nil {
 		dir = err.Error()
 	}
-	var rows []list.Item
-	for _, target := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {
-		channel := m.settings.Channel(target)
-		rows = append(rows, item{title: m.tr("download %s", target), desc: channel + " · " + m.settings.CoreBinary(target, channel), id: settingCoreDownloadPrefix + target})
+	rows := []list.Item{
+		item{title: m.tr("Core downloads"), desc: "mihomo · sing-box · xray", id: settingCoreDownloads},
+		item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders},
 	}
-	rows = append(rows, item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders})
 	if m.settings.CoreUpdateReminders {
 		rows = append(rows, item{title: m.tr("core update check interval"), desc: m.settingValue(settingCoreInterval), id: settingCoreInterval})
 	}
-	rows = append(rows,
+	return append(rows,
 		item{title: m.tr("core channel"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreChannel},
 		item{title: m.tr("restore core backup"), desc: dir, id: settingCoreRestore},
 		item{title: m.tr("delete one backup"), desc: dir, id: settingDeleteBackup},
@@ -443,12 +476,6 @@ func (m *Model) reloadSettings() {
 		item{title: m.tr("mode"), desc: m.optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
 		item{title: m.tr("log level"), desc: m.optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
 	)
-	m.settingsList.Title = m.tr("Settings")
-	previous := m.settingsList
-	m.settingsList.SetItems(rows)
-	if previous.FilterState() != list.Unfiltered {
-		restoreListState(&m.settingsList, previous)
-	}
 }
 
 func (m Model) viewSettings() string {
