@@ -30,6 +30,7 @@ func TestBackupDeletionSettings(t *testing.T) {
 	}
 	m := New(s)
 	m.screen = screenSettings
+	m = enterSettingsMenu(t, m, menuBackups)
 	m.width = 240
 	enter := tea.KeyMsg{Type: tea.KeyEnter}
 	selectAction := func(id string) {
@@ -88,6 +89,7 @@ func TestBackupDirectorySettings(t *testing.T) {
 	}
 	m := New(s)
 	m.screen = screenSettings
+	m = enterSettingsMenu(t, m, menuBackups)
 	enter := tea.KeyMsg{Type: tea.KeyEnter}
 	var cmd tea.Cmd
 	for _, raw := range []string{"~/backup files", ""} {

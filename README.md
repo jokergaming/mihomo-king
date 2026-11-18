@@ -13,8 +13,8 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
   base64 node lists, or node links one per line.
 - Add local nodes from share links (vmess, vless, ss, trojan, hysteria2, socks5, http).
 - Switch the active subscription and reload the managed core.
-- Choose mihomo, sing-box, or Xray from the settings screen.
-- Enable **core update reminders** in Settings to check the managed core on startup and while the TUI is open. The check interval defaults to `1d` and accepts values such as `12h` or `30m`. Press `F2` to dismiss the version shown in the upper-right corner.
+- Choose mihomo, sing-box, or Xray in **Settings → Startup and runtime**.
+- Enable **core update reminders** in **Settings → Core updates** to check the managed core on startup and while the TUI is open. The check interval defaults to `1d` and accepts values such as `12h` or `30m`. Press `F2` to dismiss the version shown in the upper-right corner.
 - Convert Clash/mihomo subscriptions into sing-box or Xray runtime config.
 - Toggle TUN mode.
 - Switch the selected node within a proxy group.
@@ -27,7 +27,7 @@ shows `GLOBAL`, and direct mode shows `DIRECT`. Press `R` to restart the managed
 core (or start it if stopped), and `r` to refresh. Status refreshes every 3 seconds.
 Opening the dashboard or pressing `r` tests the selected nodes with the configured
 test URL and displays latency in milliseconds. Shared nodes are tested once.
-In Settings, **dashboard latency** controls whether latency is shown and tested
+In **Settings → Latency tests**, **dashboard latency** controls whether latency is shown and tested
 (on by default), and **latency refresh interval** sets automatic testing while
 the dashboard is open (default `10s`; accepts durations such as `30s` or `1m`,
 minimum `1s`). Both preferences persist across restarts. A new round waits for
@@ -43,7 +43,7 @@ prompts. The choice is saved in the app directory's `language` file.
 
 ### Desktop autostart
 
-Open Settings (`4`), select `autostart`, and press `Enter` to toggle it. Autostart
+Open Settings (`4`), choose **Startup and runtime → autostart**, and press `Enter` to toggle it. Autostart
 is **off by default**. When enabled, the next Linux desktop login starts the proxy
 in the background using the saved core, subscription, and TUN settings, without
 opening the TUI. Disabling it leaves the current proxy running.
@@ -96,11 +96,11 @@ mihomo-king chain off                 # remove the generated chain node
 tail -f "$(mihomo-king paths log)"
 ```
 
-Both channels share one installation directory. For example, if Settings finds `/opt/bin/xray` on `PATH`, it installs alpha at `/opt/bin/xray-alpha`. With neither channel installed or configured, the first download uses `~/.local/bin/<core>` or `~/.local/bin/<core>-alpha`. Choose **core channel** in Settings while the core is stopped. Downloading the other channel leaves the running channel alone. `--channel release` remains an alias for `stable`.
+Both channels share one installation directory. For example, if Settings finds `/opt/bin/xray` on `PATH`, it installs alpha at `/opt/bin/xray-alpha`. With neither channel installed or configured, the first download uses `~/.local/bin/<core>` or `~/.local/bin/<core>-alpha`. Choose **Startup and runtime → core channel** in Settings while the core is stopped. Downloading the other channel leaves the running channel alone. `--channel release` remains an alias for `stable`.
 
 Each core defaults to its official GitHub Releases source. **Core release source** overrides the selected core for downloads and reminders. Enter a GitHub repository's releases page or an HTTPS endpoint returning the GitHub releases list in JSON. Clear it to restore the default.
 
-An update stages the new binary, checks its version, and validates the active configuration when the core is running. It backs up the previous executable, stops the running core, replaces it at its existing path and restarts it. A failed restart triggers automatic rollback. Linux downloads prompt for sudo when needed to grant network capabilities. Each path and channel keeps three backups by default; set the count to zero to discard backups after a successful update. Use **restore core backup** in Settings to select a backup by UTC timestamp, or use the CLI:
+An update stages the new binary, checks its version, and validates the active configuration when the core is running. It backs up the previous executable, stops the running core, replaces it at its existing path and restarts it. A failed restart triggers automatic rollback. Linux downloads prompt for sudo when needed to grant network capabilities. Each path and channel keeps three backups by default; set the count to zero to discard backups after a successful update. Use **Core backups → restore core backup** in Settings to select a backup by UTC timestamp, or use the CLI:
 
 ```bash
 mihomo-king core backups

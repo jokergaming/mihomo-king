@@ -20,6 +20,7 @@ func TestDashboardSettingsEditAndPersistence(t *testing.T) {
 	}
 	m := New(s)
 	m.screen = screenSettings
+	m = enterSettingsMenu(t, m, menuLatency)
 	selectSetting := func(id string) {
 		t.Helper()
 		for i, row := range m.settingsList.Items() {

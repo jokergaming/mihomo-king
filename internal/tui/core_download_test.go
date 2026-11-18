@@ -29,7 +29,7 @@ func TestSelectXrayDownloadWhileMihomoRuns(t *testing.T) {
 		}
 	}
 	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEsc})
-	if m.screen != screenSettings || m.settingsList.SelectedItem().(item).id != settingCoreDownloads {
+	if m.screen != screenSettings || m.settingsList.SelectedItem().(item).id != menuDownloads {
 		t.Fatal("Esc did not return to the downloads entry in Settings")
 	}
 	m, _ = press(m, enter)

@@ -29,7 +29,6 @@ const (
 	settingMihomoBin          = "mihomo_bin"
 	settingSingBoxBin         = "sing_box_bin"
 	settingXrayBin            = "xray_bin"
-	settingCoreDownloads      = "core_downloads"
 	settingCoreDownloadPrefix = "core_download_"
 	settingCoreRestore        = "core_restore"
 	settingDeleteBackup       = "delete_core_backup"
@@ -51,6 +50,16 @@ const (
 	settingAutostart          = "autostart"
 	settingDashboardLatency   = "dashboard_latency_enabled"
 	settingDashboardInterval  = "dashboard_latency_interval"
+)
+
+const (
+	menuDownloads = "Core downloads"
+	menuPaths     = "Core binary paths"
+	menuRuntime   = "Startup and runtime"
+	menuUpdates   = "Core updates"
+	menuBackups   = "Core backups"
+	menuNetwork   = "Network and TUN"
+	menuLatency   = "Latency tests"
 )
 
 type backupsMsg struct {
@@ -100,8 +109,8 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch k.String() {
 		case "esc":
-			if m.coreDownloadsOpen {
-				m.showCoreDownloads(false)
+			if m.settingsMenu != "" {
+				m.openSettingsMenu("")
 				return m, nil
 			}
 			return m.switchScreen(screenDashboard)
@@ -124,8 +133,8 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if sel.id == settingCoreDownloads {
-		m.showCoreDownloads(true)
+	if m.settingsMenu == "" {
+		m.openSettingsMenu(sel.id)
 		return m, nil
 	}
 	if sel.id == settingDeleteBackups {
@@ -412,27 +421,26 @@ func (m *Model) saveSettingValue(key, raw string) error {
 	return m.settings.Save()
 }
 
-func (m *Model) showCoreDownloads(open bool) {
-	m.coreDownloadsOpen = open
+func (m *Model) openSettingsMenu(menu string) {
+	previous := m.settingsMenu
+	m.settingsMenu = menu
 	m.settingsList.ResetFilter()
 	m.reloadSettings()
 	m.settingsList.GoToStart()
+	if menu == "" {
+		for i, row := range m.settingsList.Items() {
+			if row.(item).id == previous {
+				m.settingsList.Select(i)
+				break
+			}
+		}
+	}
 }
 
 func (m *Model) reloadSettings() {
 	previous := m.settingsList
-	var rows []list.Item
-	if m.coreDownloadsOpen {
-		m.settingsList.Title = m.tr("Core downloads")
-		for _, target := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {
-			channel := m.settings.Channel(target)
-			rows = append(rows, item{title: m.tr("download %s", target), desc: channel + " · " + m.settings.CoreBinary(target, channel), id: settingCoreDownloadPrefix + target})
-		}
-	} else {
-		m.settingsList.Title = m.tr("Settings")
-		rows = m.settingsRows()
-	}
-	m.settingsList.SetItems(rows)
+	m.settingsList.Title = m.tr(cmp.Or(m.settingsMenu, "Settings"))
+	m.settingsList.SetItems(m.settingsRows())
 	if previous.FilterState() != list.Unfiltered {
 		restoreListState(&m.settingsList, previous)
 	}
@@ -440,42 +448,79 @@ func (m *Model) reloadSettings() {
 
 func (m Model) settingsRows() []list.Item {
 	tool := m.settings.Tool()
-	spec, _ := core.SpecFor(tool)
-	dir, err := core.BackupDir(m.settings, tool, m.settings.Channel(tool))
-	if err != nil {
-		dir = err.Error()
+	switch m.settingsMenu {
+	case "":
+		category := func(title, description string) list.Item {
+			return item{id: title, title: m.tr(title), desc: m.tr(description)}
+		}
+		return []list.Item{
+			category(menuDownloads, "mihomo · sing-box · xray"),
+			category(menuPaths, "mihomo · sing-box · xray"),
+			category(menuRuntime, "Managed core, channel, mode, logging and autostart"),
+			category(menuUpdates, "Release source, reminders and check interval"),
+			category(menuBackups, "Backup directory, retention, restore and deletion"),
+			category(menuNetwork, "Controller, proxy port, TUN and GeoIP"),
+			category(menuLatency, "Test URL, dashboard latency and refresh interval"),
+		}
+	case menuDownloads:
+		var rows []list.Item
+		for _, target := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {
+			channel := m.settings.Channel(target)
+			rows = append(rows, item{title: m.tr("download %s", target), desc: channel + " · " + m.settings.CoreBinary(target, channel), id: settingCoreDownloadPrefix + target})
+		}
+		return rows
+	case menuPaths:
+		return []list.Item{
+			item{title: m.tr("mihomo binary"), desc: m.binaryDesc(m.settingValue(settingMihomoBin)), id: settingMihomoBin},
+			item{title: m.tr("sing-box binary"), desc: m.binaryDesc(m.settingValue(settingSingBoxBin)), id: settingSingBoxBin},
+			item{title: m.tr("xray binary"), desc: m.binaryDesc(m.settingValue(settingXrayBin)), id: settingXrayBin},
+		}
+	case menuRuntime:
+		return []list.Item{
+			item{title: m.tr("managed tool"), desc: m.settings.ToolLabel() + m.tr("  ·  options: mihomo, sing-box, xray  ·  enter to toggle"), id: settingTool},
+			item{title: m.tr("core channel"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreChannel},
+			item{title: m.tr("mode"), desc: m.optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
+			item{title: m.tr("log level"), desc: m.optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
+			item{title: m.tr("autostart"), desc: m.autostartDescription(), id: settingAutostart},
+		}
+	case menuUpdates:
+		spec, _ := core.SpecFor(tool)
+		rows := []list.Item{
+			item{title: m.tr("core release source"), desc: cmp.Or(m.settingValue(settingCoreSource), "https://github.com/"+spec.Repo+"/releases"), id: settingCoreSource},
+			item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders},
+		}
+		if m.settings.CoreUpdateReminders {
+			rows = append(rows, item{title: m.tr("core update check interval"), desc: m.settingValue(settingCoreInterval), id: settingCoreInterval})
+		}
+		return rows
+	case menuBackups:
+		dir, err := core.BackupDir(m.settings, tool, m.settings.Channel(tool))
+		if err != nil {
+			dir = err.Error()
+		}
+		return []list.Item{
+			item{title: m.tr("core backup root"), desc: cmp.Or(m.settings.CoreBackupRoot, m.tr("beside the core binary")), id: settingBackupRoot},
+			item{title: m.tr("backups to keep per channel"), desc: m.settingValue(settingCoreBackups), id: settingCoreBackups},
+			item{title: m.tr("restore core backup"), desc: dir, id: settingCoreRestore},
+			item{title: m.tr("delete one backup"), desc: dir, id: settingDeleteBackup},
+			item{title: m.tr("delete all core backups"), desc: m.tr("all configured cores and channels"), id: settingDeleteBackups},
+		}
+	case menuNetwork:
+		return []list.Item{
+			item{title: m.tr("controller"), desc: m.settings.Controller, id: settingController},
+			item{title: m.tr("mixed port"), desc: strconv.Itoa(m.settings.MixedPort), id: settingMixedPort},
+			item{title: m.tr("tun device"), desc: m.settings.TunDevice, id: settingTunDevice},
+			item{title: m.tr("tun address"), desc: m.settings.TunAddress, id: settingTunAddress},
+			item{title: m.tr("download geoip"), desc: m.geoStatus(m.settings), id: settingGeoGet},
+		}
+	case menuLatency:
+		return []list.Item{
+			item{title: m.tr("test url"), desc: m.settings.TestURL, id: settingTestURL},
+			item{title: m.tr("dashboard latency"), desc: m.tr("%s · show and test latency on dashboard · enter to toggle", message(autostartState(m.settings.DashboardLatencyEnabled))), id: settingDashboardLatency},
+			item{title: m.tr("latency refresh interval"), desc: m.settings.DashboardLatencyInterval.String(), id: settingDashboardInterval},
+		}
 	}
-	rows := []list.Item{
-		item{title: m.tr("Core downloads"), desc: "mihomo · sing-box · xray", id: settingCoreDownloads},
-		item{title: m.tr("core update reminders"), desc: m.tr(autostartState(m.settings.CoreUpdateReminders)), id: settingCoreReminders},
-	}
-	if m.settings.CoreUpdateReminders {
-		rows = append(rows, item{title: m.tr("core update check interval"), desc: m.settingValue(settingCoreInterval), id: settingCoreInterval})
-	}
-	return append(rows,
-		item{title: m.tr("core channel"), desc: tool + " · " + m.settings.Channel(tool), id: settingCoreChannel},
-		item{title: m.tr("restore core backup"), desc: dir, id: settingCoreRestore},
-		item{title: m.tr("delete one backup"), desc: dir, id: settingDeleteBackup},
-		item{title: m.tr("delete all core backups"), desc: m.tr("all configured cores and channels"), id: settingDeleteBackups},
-		item{title: m.tr("core backup root"), desc: cmp.Or(m.settings.CoreBackupRoot, m.tr("beside the core binary")), id: settingBackupRoot},
-		item{title: m.tr("backups to keep per channel"), desc: m.settingValue(settingCoreBackups), id: settingCoreBackups},
-		item{title: m.tr("core release source"), desc: cmp.Or(m.settingValue(settingCoreSource), "https://github.com/"+spec.Repo+"/releases"), id: settingCoreSource},
-		item{title: m.tr("download geoip"), desc: m.geoStatus(m.settings), id: settingGeoGet},
-		item{title: m.tr("managed tool"), desc: m.settings.ToolLabel() + m.tr("  ·  options: mihomo, sing-box, xray  ·  enter to toggle"), id: settingTool},
-		item{title: m.tr("autostart"), desc: m.autostartDescription(), id: settingAutostart},
-		item{title: m.tr("mihomo binary"), desc: m.binaryDesc(m.settingValue(settingMihomoBin)), id: settingMihomoBin},
-		item{title: m.tr("sing-box binary"), desc: m.binaryDesc(m.settingValue(settingSingBoxBin)), id: settingSingBoxBin},
-		item{title: m.tr("xray binary"), desc: m.binaryDesc(m.settingValue(settingXrayBin)), id: settingXrayBin},
-		item{title: m.tr("controller"), desc: m.settings.Controller, id: settingController},
-		item{title: m.tr("mixed port"), desc: strconv.Itoa(m.settings.MixedPort), id: settingMixedPort},
-		item{title: m.tr("tun device"), desc: m.settings.TunDevice, id: settingTunDevice},
-		item{title: m.tr("tun address"), desc: m.settings.TunAddress, id: settingTunAddress},
-		item{title: m.tr("test url"), desc: m.settings.TestURL, id: settingTestURL},
-		item{title: m.tr("dashboard latency"), desc: m.tr("%s · show and test latency on dashboard · enter to toggle", message(autostartState(m.settings.DashboardLatencyEnabled))), id: settingDashboardLatency},
-		item{title: m.tr("latency refresh interval"), desc: m.settings.DashboardLatencyInterval.String(), id: settingDashboardInterval},
-		item{title: m.tr("mode"), desc: m.optionDesc(m.settings.Mode, m.settingOptions(settingMode)), id: settingMode},
-		item{title: m.tr("log level"), desc: m.optionDesc(m.settings.LogLevel, m.settingOptions(settingLogLevel)), id: settingLogLevel},
-	)
+	return nil
 }
 
 func (m Model) viewSettings() string {

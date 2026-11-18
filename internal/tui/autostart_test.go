@@ -25,17 +25,8 @@ func TestSettingsAutostartToggleAndPersistence(t *testing.T) {
 	if !m.autostartLoaded || m.autostartEnabled {
 		t.Fatal("autostart must default to off")
 	}
-	selectAutostart := func() {
-		t.Helper()
-		for i, row := range m.settingsList.Items() {
-			if row.(item).id == settingAutostart {
-				m.settingsList.Select(i)
-				return
-			}
-		}
-		t.Fatal("autostart row missing")
-	}
-	selectAutostart()
+	m = enterSettingsMenu(t, m, menuRuntime)
+	selectSettingsRow(t, &m, settingAutostart)
 	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil || !m.autostartBusy || m.editingSetting {
 		t.Fatal("toggle should run asynchronously without an input prompt")
@@ -55,7 +46,8 @@ func TestSettingsAutostartToggleAndPersistence(t *testing.T) {
 	if !m.autostartEnabled {
 		t.Fatal("fresh model lost autostart state")
 	}
-	selectAutostart()
+	m = enterSettingsMenu(t, m, menuRuntime)
+	selectSettingsRow(t, &m, settingAutostart)
 	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = press(m, cmd())
 	if m.autostartEnabled || m.statusErr {
@@ -88,14 +80,10 @@ func TestSettingsAutostartFailureAndRetry(t *testing.T) {
 	if !m.autostartLoaded || m.autostartEnabled || m.statusErr {
 		t.Fatal("refresh did not recover autostart state")
 	}
-	for i, row := range m.settingsList.Items() {
-		if row.(item).id == settingAutostart {
-			m.settingsList.Select(i)
-			break
-		}
-	}
 	// Status remains readable, but creating the launcher must fail without env.
 	t.Setenv("PATH", t.TempDir())
+	m = enterSettingsMenu(t, m, menuRuntime)
+	selectSettingsRow(t, &m, settingAutostart)
 	m, cmd = press(m, tea.KeyMsg{Type: tea.KeyEnter})
 	m, _ = press(m, cmd())
 	if !m.statusErr || m.autostartEnabled || m.autostartBusy || !strings.Contains(m.status.String(), "requires env") {

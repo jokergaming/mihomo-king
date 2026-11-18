@@ -70,11 +70,13 @@ func TestLanguageSwitchAcrossScreensAndPersistence(t *testing.T) {
 			t.Fatalf("English screen %d contains Chinese:\n%s", screen, view)
 		}
 	}
+	m = enterSettingsMenu(t, m, menuRuntime)
 	for _, row := range m.settingsList.Items() {
 		if entry := row.(item); entry.id == settingAutostart && entry.title != "autostart" {
 			t.Fatalf("autostart title = %q", entry.title)
 		}
 	}
+	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEsc})
 	m = switchLanguage(t, m)
 	for _, screen := range []screen{screenDashboard, screenSubs, screenNodes, screenSettings} {
 		m.screen = screen
@@ -115,7 +117,11 @@ func TestGlobalLanguageSwitchPreservesFormsAndPrompts(t *testing.T) {
 		{"edit node", func(m *Model) { m.screen, m.editingSub, m.editLocal = screenSubs, true, true }, "编辑本地节点"},
 		{"update prompt", func(m *Model) { m.screen, m.updatePrompt = screenSubs, "provider" }, "立即更新订阅"},
 		{"test URL", func(m *Model) { m.screen, m.editingTestURL = screenNodes, true }, "测速地址"},
-		{"setting", func(m *Model) { m.screen, m.editingSetting, m.settingKey = screenSettings, true, settingController }, "控制器"},
+		{"setting", func(m *Model) {
+			m.screen = screenSettings
+			m.openSettingsMenu(menuNetwork)
+			m.editingSetting, m.settingKey = true, settingController
+		}, "控制器"},
 		{"core password", func(m *Model) { m.screen, m.tunStage = screenSettings, tunAskCoreCaps }, "sudo 密码"},
 		{"TUN password", func(m *Model) { m.screen, m.tunStage = screenDashboard, tunAskPassword }, "sudo 密码"},
 		{"TUN conflict", func(m *Model) {
@@ -189,6 +195,7 @@ func TestLanguageSaveFailureKeepsCurrentLanguage(t *testing.T) {
 func TestLanguageSwitchIgnoresStaleFilterResults(t *testing.T) {
 	m := editableSubsTestModel(t)
 	m.screen = screenSettings
+	m = enterSettingsMenu(t, m, menuPaths)
 	m.settingsList.SetFilterText("mihomo")
 	m.settingsList.SetFilterState(list.Filtering)
 	stale := m.settingsList.SetItems(m.settingsList.Items())
