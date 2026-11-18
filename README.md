@@ -14,7 +14,7 @@ built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 - Add local nodes from share links (vmess, vless, ss, trojan, hysteria2, socks5, http).
 - Switch the active subscription and reload the managed core.
 - Choose mihomo, sing-box, or Xray in **Settings → Startup and runtime**.
-- Enable **core update reminders** in **Settings → Core updates** to check the managed core on startup and while the TUI is open. The check interval defaults to `1d` and accepts values such as `12h` or `30m`. Press `F2` to dismiss the version shown in the upper-right corner.
+- Enable **core update reminders** in **Settings → Core management → Core updates** to check the managed core on startup and while the TUI is open. The check interval defaults to `1d` and accepts values such as `12h` or `30m`. Press `F2` to dismiss the version shown in the upper-right corner.
 - Convert Clash/mihomo subscriptions into sing-box or Xray runtime config.
 - Toggle TUN mode.
 - Switch the selected node within a proxy group.
@@ -100,7 +100,7 @@ Both channels share one installation directory. For example, if Settings finds `
 
 Each core defaults to its official GitHub Releases source. **Core release source** overrides the selected core for downloads and reminders. Enter a GitHub repository's releases page or an HTTPS endpoint returning the GitHub releases list in JSON. Clear it to restore the default.
 
-An update stages the new binary, checks its version, and validates the active configuration when the core is running. It backs up the previous executable, stops the running core, replaces it at its existing path and restarts it. A failed restart triggers automatic rollback. Linux downloads prompt for sudo when needed to grant network capabilities. Each path and channel keeps three backups by default; set the count to zero to discard backups after a successful update. Use **Core backups → restore core backup** in Settings to select a backup by UTC timestamp, or use the CLI:
+An update stages the new binary, checks its version, and validates the active configuration when the core is running. It backs up the previous executable, stops the running core, replaces it at its existing path and restarts it. A failed restart triggers automatic rollback. Linux downloads prompt for sudo when needed to grant network capabilities. Each path and channel keeps three backups by default; set the count to zero to discard backups after a successful update. Use **Core management → Core backups → restore core backup** in Settings to select a backup by UTC timestamp, or use the CLI:
 
 ```bash
 mihomo-king core backups

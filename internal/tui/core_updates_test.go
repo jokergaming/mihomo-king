@@ -52,7 +52,7 @@ func TestCoreUpdatePreferencesAndNotice(t *testing.T) {
 	}
 	m := New(s)
 	m.screen = screenSettings
-	m = enterSettingsMenu(t, m, menuUpdates)
+	m = enterSettingsMenu(t, m, menuCore, menuUpdates)
 	rowIndex := func(key string) int {
 		return slices.IndexFunc(m.settingsList.Items(), func(row list.Item) bool { return row.(item).id == key })
 	}

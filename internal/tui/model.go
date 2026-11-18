@@ -707,6 +707,9 @@ func (m Model) screenHelp() string {
 			}
 			return m.tr("enter set path · r rename · esc back")
 		}
+		if m.settingsMenu == menuCore {
+			return m.tr("enter open · esc back · / filter")
+		}
 		if m.settingsMenu == menuDownloads {
 			return m.tr("enter choose channel · esc back · / filter")
 		}

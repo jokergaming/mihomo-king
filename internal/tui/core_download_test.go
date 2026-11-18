@@ -18,9 +18,9 @@ func TestSelectXrayDownloadWhileMihomoRuns(t *testing.T) {
 		}
 	}
 	enter := tea.KeyMsg{Type: tea.KeyEnter}
-	m, _ = press(m, enter)
+	m = enterSettingsMenu(t, m, menuCore, menuDownloads)
 	rows := m.settingsList.Items()
-	if m.settingsList.Title != "核心下载管理" || len(rows) != 3 {
+	if m.settingsList.Title != "内核下载" || len(rows) != 3 {
 		t.Fatalf("unexpected submenu %q with %d rows", m.settingsList.Title, len(rows))
 	}
 	for i, tool := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {

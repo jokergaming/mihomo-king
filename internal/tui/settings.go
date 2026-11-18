@@ -53,6 +53,7 @@ const (
 )
 
 const (
+	menuCore      = "Core management"
 	menuDownloads = "Core downloads"
 	menuPaths     = "Core binaries"
 	menuRuntime   = "Startup and runtime"
@@ -61,6 +62,26 @@ const (
 	menuNetwork   = "Network and TUN"
 	menuLatency   = "Latency tests"
 )
+
+var settingsCategories = []struct{ parent, title, description string }{
+	{"", menuNetwork, "Controller, proxy port, TUN and GeoIP"},
+	{"", menuRuntime, "Managed core, channel, mode, logging and autostart"},
+	{"", menuCore, "Downloads, updates, backups and binary paths"},
+	{"", menuLatency, "Test URL, dashboard latency and refresh interval"},
+	{menuCore, menuDownloads, "mihomo · sing-box · xray"},
+	{menuCore, menuUpdates, "Release source, reminders and check interval"},
+	{menuCore, menuBackups, "Backup directory, retention, restore and deletion"},
+	{menuCore, menuPaths, "mihomo · sing-box · xray"},
+}
+
+func settingsParent(menu string) (string, bool) {
+	for _, category := range settingsCategories {
+		if category.title == menu {
+			return category.parent, true
+		}
+	}
+	return "", false
+}
 
 type backupsMsg struct {
 	names []string
@@ -109,8 +130,8 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch k.String() {
 		case "esc":
-			if m.settingsMenu != "" {
-				m.openSettingsMenu("")
+			if parent, ok := settingsParent(m.settingsMenu); ok {
+				m.openSettingsMenu(parent)
 				return m, nil
 			}
 			return m.switchScreen(screenDashboard)
@@ -146,7 +167,7 @@ func (m Model) settingsEnter() (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
-	if m.settingsMenu == "" {
+	if _, ok := settingsParent(sel.id); ok {
 		m.openSettingsMenu(sel.id)
 		return m, nil
 	}
@@ -442,7 +463,7 @@ func (m *Model) openSettingsMenu(menu string) {
 	m.settingsList.ResetFilter()
 	m.reloadSettings()
 	m.settingsList.GoToStart()
-	if menu == "" {
+	if parent, ok := settingsParent(previous); ok && parent == menu {
 		for i, row := range m.settingsList.Items() {
 			if row.(item).id == previous {
 				m.settingsList.Select(i)
@@ -464,19 +485,14 @@ func (m *Model) reloadSettings() {
 func (m Model) settingsRows() []list.Item {
 	tool := m.settings.Tool()
 	switch m.settingsMenu {
-	case "":
-		category := func(title, description string) list.Item {
-			return item{id: title, title: m.tr(title), desc: m.tr(description)}
+	case "", menuCore:
+		var rows []list.Item
+		for _, category := range settingsCategories {
+			if category.parent == m.settingsMenu {
+				rows = append(rows, item{id: category.title, title: m.tr(category.title), desc: m.tr(category.description)})
+			}
 		}
-		return []list.Item{
-			category(menuDownloads, "mihomo · sing-box · xray"),
-			category(menuPaths, "mihomo · sing-box · xray"),
-			category(menuRuntime, "Managed core, channel, mode, logging and autostart"),
-			category(menuUpdates, "Release source, reminders and check interval"),
-			category(menuBackups, "Backup directory, retention, restore and deletion"),
-			category(menuNetwork, "Controller, proxy port, TUN and GeoIP"),
-			category(menuLatency, "Test URL, dashboard latency and refresh interval"),
-		}
+		return rows
 	case menuDownloads:
 		var rows []list.Item
 		for _, target := range []string{config.ToolMihomo, config.ToolSingBox, config.ToolXray} {

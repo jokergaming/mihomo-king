@@ -20,12 +20,14 @@ func selectSettingsRow(t *testing.T, m *Model, id string) {
 	t.Fatalf("missing %q in %q", id, m.settingsList.Title)
 }
 
-func enterSettingsMenu(t *testing.T, m Model, menu string) Model {
+func enterSettingsMenu(t *testing.T, m Model, menus ...string) Model {
 	t.Helper()
-	selectSettingsRow(t, &m, menu)
-	m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.settingsMenu != menu || m.editingSetting {
-		t.Fatalf("could not open %q", menu)
+	for _, menu := range menus {
+		selectSettingsRow(t, &m, menu)
+		m, _ = press(m, tea.KeyMsg{Type: tea.KeyEnter})
+		if m.settingsMenu != menu || m.editingSetting {
+			t.Fatalf("could not open %q", menu)
+		}
 	}
 	return m
 }
@@ -34,30 +36,46 @@ func TestSettingsCategoryNavigation(t *testing.T) {
 	m := editableSubsTestModel(t)
 	m.screen = screenSettings
 	m.settings.CoreUpdateReminders = true
-	for _, row := range m.settingsList.Items() {
-		menu := row.(item).id
-		m = enterSettingsMenu(t, m, menu)
-		m = switchLanguage(t, m)
-		if m.settingsList.Title != m.tr(menu) || !hasChinese(m.settingsList.Title) || len(m.settingsList.Items()) == 0 {
-			t.Fatalf("unexpected submenu %q", m.settingsList.Title)
+	for _, tc := range []struct {
+		parent string
+		menus  []string
+	}{
+		{"", []string{menuNetwork, menuRuntime, menuCore, menuLatency}},
+		{menuCore, []string{menuDownloads, menuUpdates, menuBackups, menuPaths}},
+	} {
+		if tc.parent != "" {
+			m = enterSettingsMenu(t, m, tc.parent)
 		}
-		for _, child := range m.settingsList.Items() {
-			if !hasChinese(child.(item).title) {
-				t.Fatalf("untranslated row in %q: %v", menu, child)
+		if got := len(m.settingsList.Items()); got != len(tc.menus) {
+			t.Fatalf("%q has %d entries, want %d", tc.parent, got, len(tc.menus))
+		}
+		for i, menu := range tc.menus {
+			if got := m.settingsList.Items()[i].(item).id; got != menu {
+				t.Fatalf("%q entry %d = %q, want %q", tc.parent, i, got, menu)
 			}
+			m = enterSettingsMenu(t, m, menu)
+			m = switchLanguage(t, m)
+			if m.settingsList.Title != m.tr(menu) || !hasChinese(m.settingsList.Title) || len(m.settingsList.Items()) == 0 {
+				t.Fatalf("unexpected submenu %q", m.settingsList.Title)
+			}
+			for _, child := range m.settingsList.Items() {
+				if !hasChinese(child.(item).title) {
+					t.Fatalf("untranslated row in %q: %v", menu, child)
+				}
+			}
+			m, _ = press(m, tea.KeyMsg{Type: tea.KeyEsc})
+			if m.settingsMenu != tc.parent || m.settingsList.SelectedItem().(item).id != menu {
+				t.Fatalf("Esc did not return to %q in %q", menu, tc.parent)
+			}
+			m = switchLanguage(t, m)
 		}
-		m, _ = press(m, tea.KeyMsg{Type: tea.KeyEsc})
-		if m.settingsMenu != "" || m.settingsList.SelectedItem().(item).id != menu {
-			t.Fatalf("Esc did not return to %q in Settings", menu)
-		}
-		m = switchLanguage(t, m)
 	}
 }
 
 func TestCorePathSettingsPersist(t *testing.T) {
 	m := editableSubsTestModel(t)
 	m.screen = screenSettings
-	m = enterSettingsMenu(t, m, menuPaths)
+	m = enterSettingsMenu(t, m, menuCore, menuPaths)
 	if len(m.settingsList.Items()) != 3 {
 		t.Fatalf("unexpected binary path rows: %v", m.settingsList.Items())
 	}

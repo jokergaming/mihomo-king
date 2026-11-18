@@ -195,7 +195,7 @@ func TestLanguageSaveFailureKeepsCurrentLanguage(t *testing.T) {
 func TestLanguageSwitchIgnoresStaleFilterResults(t *testing.T) {
 	m := editableSubsTestModel(t)
 	m.screen = screenSettings
-	m = enterSettingsMenu(t, m, menuPaths)
+	m = enterSettingsMenu(t, m, menuCore, menuPaths)
 	m.settingsList.SetFilterText("mihomo")
 	m.settingsList.SetFilterState(list.Filtering)
 	stale := m.settingsList.SetItems(m.settingsList.Items())

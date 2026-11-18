@@ -104,8 +104,11 @@ var chinese = map[string]string{
 	"Controller, proxy port, TUN and GeoIP":              "控制器、代理端口、TUN 与 GeoIP",
 	"Test URL, dashboard latency and refresh interval":   "测速地址、主界面延迟显示与刷新间隔",
 
-	"Core downloads": "核心下载管理",
-	"enter choose channel · esc back · / filter": "enter 选择渠道 · esc 返回 · / 筛选",
+	"Core management": "内核管理",
+	"Core downloads":  "内核下载",
+	"Downloads, updates, backups and binary paths": "下载、更新、备份与程序路径",
+	"enter open · esc back · / filter":             "enter 打开 · esc 返回 · / 筛选",
+	"enter choose channel · esc back · / filter":   "enter 选择渠道 · esc 返回 · / 筛选",
 	"download geoip":  "下载 GeoIP",
 	"managed tool":    "管理的核心",
 	"mihomo binary":   "mihomo 程序路径",

@@ -35,7 +35,7 @@ func TestBinaryActionsOnSelectedAlpha(t *testing.T) {
 	m.settings.SetCoreBinary(tool, config.Alpha, path)
 	stable := m.settings.CoreBinary(tool, config.Stable)
 	m.screen = screenSettings
-	m = enterSettingsMenu(t, m, menuPaths)
+	m = enterSettingsMenu(t, m, menuCore, menuPaths)
 	selectSettingsRow(t, &m, settingXrayBin)
 	backupDir, err := core.BackupDir(m.settings, tool, config.Alpha)
 	if err != nil {
