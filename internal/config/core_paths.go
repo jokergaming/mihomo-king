@@ -52,6 +52,15 @@ func (s *Settings) SetCoreBinary(tool, channel, path string) {
 	s.AlphaBinaries = WithCoreValue(s.AlphaBinaries, tool, alpha)
 }
 
+// SetChannelPath changes only the selected channel when an installed file moves.
+func (s *Settings) SetChannelPath(tool, channel, path string) {
+	if channel == Alpha {
+		s.AlphaBinaries = WithCoreValue(s.AlphaBinaries, tool, path)
+	} else {
+		s.setStableBinary(tool, path)
+	}
+}
+
 func findMihomoBin() string  { return detectBin(ToolMihomo) }
 func findSingBoxBin() string { return detectBin(ToolSingBox) }
 func findXrayBin() string    { return detectBin(ToolXray) }
@@ -125,6 +134,11 @@ func (s *Settings) resolveCorePaths() error {
 				stable = ""
 			}
 		}
+		// Discovery can leave an uninstalled default path empty. Preserve that
+		// destination too when the installed channel has been renamed independently.
+		if !fresh && recordedCorePath(stable, s.stableBinary(tool), base) && recordedCorePath(alpha, s.AlphaBinaries[tool], base+"-alpha") {
+			continue
+		}
 		useAlpha := alpha != "" && (stable == "" || !fileExists(stable) && (channel == Alpha || fileExists(alpha)))
 		if useAlpha {
 			s.SetCoreBinary(tool, Alpha, alpha)
@@ -137,6 +151,10 @@ func (s *Settings) resolveCorePaths() error {
 		s.CoreChannels = WithCoreValue(s.CoreChannels, tool, channel)
 	}
 	return nil
+}
+
+func recordedCorePath(candidate, saved, fallback string) bool {
+	return saved != "" && (candidate == saved || candidate == "" && saved == fallback && !fileExists(saved))
 }
 
 func corePathCandidate(saved, name, fallback, retired string) string {

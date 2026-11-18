@@ -167,7 +167,9 @@ func Install(ctx context.Context, s *config.Settings, tool, channel, password st
 			return err
 		}
 		if runtime.GOOS == "linux" {
-			return grantNetCaps(stage, password, res)
+			err := GrantNetCaps(stage, password)
+			res.Caps = err == nil
+			return err
 		}
 		return nil
 	})
@@ -487,25 +489,34 @@ func executable(body []byte) bool {
 
 func needsSudoPassword() bool { return os.Geteuid() != 0 }
 
-func grantNetCaps(dest, password string, res *Result) error {
+// GrantNetCaps applies the Linux capabilities required by TUN to an installed binary.
+func GrantNetCaps(dest, password string) error {
+	if needsSudoPassword() && password == "" {
+		return fmt.Errorf("sudo password required to set cap_net_admin,cap_net_raw=ep on %s", dest)
+	}
+	dest, err := exec.LookPath(dest)
+	if err != nil {
+		return err
+	}
+	dest, err = filepath.EvalSymlinks(dest)
+	if err != nil {
+		return err
+	}
+	dest, err = filepath.Abs(dest)
+	if err != nil {
+		return err
+	}
 	if !needsSudoPassword() {
 		if err := exec.Command("setcap", "cap_net_admin,cap_net_raw=ep", dest).Run(); err != nil {
 			return fmt.Errorf("setcap %s: %w", dest, err)
 		}
-		res.Caps = true
-		return nil
-	}
-	if password == "" {
-		return fmt.Errorf("sudo password required to set cap_net_admin,cap_net_raw=ep on %s", dest)
-	}
-	if err := mihomo.GrantNetCaps(password, dest); err != nil {
+	} else if err := mihomo.GrantNetCaps(password, dest); err != nil {
 		return err
 	}
 	has, ok := mihomo.HasNetCaps(dest)
 	if ok && !has {
 		return fmt.Errorf("setcap reported success but %s still lacks net caps", dest)
 	}
-	res.Caps = true
 	return nil
 }
 

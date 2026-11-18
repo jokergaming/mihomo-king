@@ -2,6 +2,7 @@
 package tui
 
 import (
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ const (
 	tunAskForeign           // another TUN is up: delete it / continue / cancel
 	tunAskPassword          // sudo password needed (delete foreign TUN or setcap)
 	tunAskCoreCaps          // sudo password for setcap after a core download
+	tunAskInstalledCaps
 )
 
 // addForm is the input form open on the subscriptions screen, if any.
@@ -265,6 +267,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case coreUpdateCheckedMsg:
 		return m.finishCoreCheck(msg)
 
+	case binaryCapsMsg:
+		m.reloadSettings()
+		return m.Update(coreActionMsg{msg.actionMsg})
+	case binaryRenamedMsg:
+		m.coreBusy = false
+		if msg.err != nil {
+			m.setError(msg.err)
+			return m, nil
+		}
+		m.settings.SetChannelPath(msg.tool, msg.channel, msg.path)
+		m.editingSetting = false
+		m.settingInput.Blur()
+		m.reloadSettings()
+		m.setStatus("renamed binary to %s", msg.path)
+		cmd := m.restartCoreChecks()
+		return m, tea.Batch(refreshStatusCmd(m.settings), cmd)
 	case preferenceSavedMsg:
 		m.settingsSaveBusy = false
 		if msg.err != nil {
@@ -671,7 +689,7 @@ func (m Model) screenHelp() string {
 		if m.pendingDeletion != nil {
 			return m.tr("y delete · n/esc cancel")
 		}
-		if m.tunStage == tunAskCoreCaps {
+		if m.tunStage == tunAskCoreCaps || m.tunStage == tunAskInstalledCaps {
 			return m.tr("enter confirm · esc cancel")
 		}
 		if m.editingSetting {
@@ -682,6 +700,12 @@ func (m Model) screenHelp() string {
 		}
 		if m.settingsList.FilterState() == list.Filtering {
 			return m.tr("type to filter · enter apply · esc cancel")
+		}
+		if m.settingsMenu == menuPaths {
+			if runtime.GOOS == "linux" {
+				return m.tr("enter set path · r rename · s grant permissions · esc back")
+			}
+			return m.tr("enter set path · r rename · esc back")
 		}
 		if m.settingsMenu == menuDownloads {
 			return m.tr("enter choose channel · esc back · / filter")

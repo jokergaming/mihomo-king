@@ -4,6 +4,16 @@ import "mihomo-king/internal/core"
 
 // English templates are stable keys; arguments keep user content untranslated.
 var chinese = map[string]string{
+	"enter set path · r rename · s grant permissions · esc back":   "Enter 设置路径 · r 重命名 · s 授予网络权限 · Esc 返回",
+	"enter set path · r rename · esc back":                         "Enter 设置路径 · r 重命名 · Esc 返回",
+	"new binary file name":                                         "新的核心程序文件名",
+	"sudo password to grant network capabilities to %s":            "输入 sudo 密码，授予 %s 网络权限",
+	"network capabilities granted to %s (effective on next start)": "已授予 %s 网络权限（下次启动时生效）",
+	"network capabilities are available on Linux only":             "仅 Linux 支持授予网络权限",
+	"renamed binary to %s":                                         "核心程序已重命名为 %s",
+	"stop the running core before renaming its binary":             "请先停止正在运行的核心，再重命名程序",
+	"enter a file name without a directory":                        "请输入文件名，无需目录",
+
 	"delete one backup":                                        "删除单个备份",
 	"delete all core backups":                                  "删除所有内核备份",
 	"all configured cores and channels":                        "所有已配置内核和渠道",
@@ -82,7 +92,7 @@ var chinese = map[string]string{
 	"loaded proxy groups":       "策略组已加载",
 	"tested %d nodes":           "已测试 %d 个节点",
 	"download %s":               "下载 %s",
-	"Core binary paths":         "内核路径管理",
+	"Core binaries":             "内核程序管理",
 	"Startup and runtime":       "启动与运行",
 	"Core updates":              "内核更新",
 	"Core backups":              "内核备份",

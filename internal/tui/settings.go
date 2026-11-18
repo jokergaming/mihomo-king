@@ -54,7 +54,7 @@ const (
 
 const (
 	menuDownloads = "Core downloads"
-	menuPaths     = "Core binary paths"
+	menuPaths     = "Core binaries"
 	menuRuntime   = "Startup and runtime"
 	menuUpdates   = "Core updates"
 	menuBackups   = "Core backups"
@@ -92,7 +92,7 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if m.tunStage == tunAskCoreCaps {
+	if m.tunStage == tunAskCoreCaps || m.tunStage == tunAskInstalledCaps {
 		return m.updateCoreCapPrompt(msg)
 	}
 	if m.editingSetting {
@@ -116,8 +116,21 @@ func (m Model) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.switchScreen(screenDashboard)
 		case "enter":
 			return m.settingsEnter()
-		case "r":
-			return m.beginAutostart(false)
+		case "r", "s":
+			if tool := m.selectedBinaryTool(); tool != "" {
+				if k.String() == "s" {
+					return m.beginInstalledCaps(tool)
+				}
+				m.settingKey = settingRenameBinary
+				m.editingSetting = true
+				m.settingInput.Placeholder = m.tr("new binary file name")
+				m.settingInput.SetValue(filepath.Base(m.settings.CoreBinary(tool, m.settings.Channel(tool))))
+				m.settingInput.CursorEnd()
+				return m, m.settingInput.Focus()
+			}
+			if k.String() == "r" {
+				return m.beginAutostart(false)
+			}
 		}
 		if nm, cmd, handled := m.globalKey(k.String()); handled {
 			return nm, cmd
@@ -218,6 +231,8 @@ func (m Model) updateSettingInput(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "enter":
 			switch m.settingKey {
+			case settingRenameBinary:
+				return m.renameSelectedBinary()
 			case settingBackupRoot:
 				root, err := config.ResolveCoreBackupRoot(m.settingInput.Value())
 				if err != nil {
@@ -538,6 +553,10 @@ func (m Model) viewSettings() string {
 	if m.coreNotice.key != "" {
 		body += "\n\n" + okStyle.Render(m.render(m.coreNotice))
 	}
+	if m.tunStage == tunAskInstalledCaps {
+		path := m.settings.CoreBinary(m.pendingCore.tool, m.pendingCore.channel)
+		return body + "\n\n" + m.tr("sudo password to grant network capabilities to %s", path) + "\n" + m.pwInput.View()
+	}
 	if m.tunStage == tunAskCoreCaps {
 		return body + m.tr("\n\n  sudo password — set cap_net_admin,cap_net_raw=ep after download:\n  ") + m.pwInput.View()
 	}
@@ -616,7 +635,11 @@ func (m Model) beginCoreCaps(tool, channel string) (tea.Model, tea.Cmd) {
 		m.setStatus("downloading %s %s…", tool, channel)
 		return m, coreDownloadCmd(m.settings, tool, channel, "")
 	}
-	m.tunStage = tunAskCoreCaps
+	return m.askCorePassword(tunAskCoreCaps)
+}
+
+func (m Model) askCorePassword(stage tunStage) (tea.Model, tea.Cmd) {
+	m.tunStage = stage
 	m.pwInput.Reset()
 	m.pwInput.Placeholder = m.tr("sudo password")
 	return m, m.pwInput.Focus()
@@ -633,6 +656,7 @@ func (m Model) updateCoreCapPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setStatus("cancelled")
 			return m, nil
 		case "enter":
+			stage := m.tunStage
 			pw := m.pwInput.Value()
 			m.pwInput.Reset()
 			m.tunStage = tunIdle
@@ -643,6 +667,9 @@ func (m Model) updateCoreCapPrompt(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			tool, channel := m.pendingCore.tool, m.pendingCore.channel
 			m.pendingCore = coreDownload{}
+			if stage == tunAskInstalledCaps {
+				return m.applyInstalledCaps(tool, channel, pw)
+			}
 			m.coreBusy = true
 			m.setStatus("downloading %s %s…", tool, channel)
 			return m, coreDownloadCmd(m.settings, tool, channel, pw)
@@ -752,6 +779,9 @@ func resolveBinary(path string) string {
 }
 
 func (m Model) settingLabel(key string) string {
+	if key == settingRenameBinary {
+		return m.tr("new binary file name")
+	}
 	for _, row := range m.settingsList.Items() {
 		if entry := row.(item); entry.id == key {
 			return entry.title

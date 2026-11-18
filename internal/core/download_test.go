@@ -150,13 +150,9 @@ func TestGrantNetCapsRequiresPasswordWhenNotRoot(t *testing.T) {
 	if !needsSudoPassword() {
 		t.Skip("running as root, setcap does not ask for a password")
 	}
-	res := &Result{}
-	err := grantNetCaps(filepath.Join(t.TempDir(), "mihomo"), "", res)
+	err := GrantNetCaps(filepath.Join(t.TempDir(), "mihomo"), "")
 	if err == nil {
 		t.Fatal("empty password was accepted")
-	}
-	if res.Caps {
-		t.Fatal("caps were marked set without a password")
 	}
 }
 
