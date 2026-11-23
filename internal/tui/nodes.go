@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
@@ -278,7 +279,7 @@ func (m *Model) memberDescription(name string) string {
 func (m Model) viewNodes() string {
 	view := m.listView(m.nodes)
 	if chain := m.settings.ActiveChain(); chain != nil {
-		view = m.tr("Chain: %s → %s  (%s)\n\n%s", chain.Entry, chain.Exit, config.ChainNodeName, view)
+		view = m.viewChain(chain) + "\n\n" + view
 	} else if m.chainEntry != "" {
 		view = m.tr("Chain entry: %s  ·  choose exit\n\n%s", m.chainEntry, view)
 	}
@@ -289,6 +290,31 @@ func (m Model) viewNodes() string {
 		view,
 		labelStyle.Render(m.tr("test url")),
 		m.testURLInput.View())
+}
+
+func (m Model) viewChain(chain *config.ProxyChain) string {
+	stages := []string{m.tr("Local"), m.tr("Entry"), m.tr("Exit"), m.tr("Target")}
+	entry, exit := chain.Entry, chain.Exit
+	connector := " ──▶ "
+	if m.width > 0 {
+		width := max(0, m.width-appStyle.GetHorizontalFrameSize())
+		nameBudget := width - ansi.StringWidth(strings.Join(stages, "")) - 2 // spaces before the names
+		entryWidth, exitWidth := ansi.StringWidth(entry), ansi.StringWidth(exit)
+		if entryWidth+exitWidth+3*ansi.StringWidth(connector) > nameBudget {
+			connector = "─▶"
+		}
+		available := max(0, nameBudget-3*ansi.StringWidth(connector))
+		entryBudget := min(entryWidth, max(available/2, available-exitWidth))
+		entry = ansi.Truncate(entry, entryBudget, "…")
+		exit = ansi.Truncate(exit, available-entryBudget, "…")
+	}
+	if entry != "" {
+		stages[1] += " " + entry
+	}
+	if exit != "" {
+		stages[2] += " " + exit
+	}
+	return strings.Join(stages, labelStyle.Render(connector))
 }
 
 func (m *Model) applyDelayMsg(msg delayMsg) {

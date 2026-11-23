@@ -1,7 +1,11 @@
 package tui
 
 import (
+	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"mihomo-king/internal/api"
 	"mihomo-king/internal/config"
@@ -83,6 +87,36 @@ func TestChooseChainNodeUsesTwoConcreteMembers(t *testing.T) {
 	m = second.(Model)
 	if cmd == nil || m.chainEntry != "" {
 		t.Fatalf("second pick: chainEntry=%q, cmd=%v", m.chainEntry, cmd)
+	}
+}
+
+func TestNodesViewDrawsActiveChain(t *testing.T) {
+	m := New(&config.Settings{
+		Active: "sub",
+		Chain:  &config.ProxyChain{Subscription: "sub", Entry: "香港入口节点01", Exit: "美国出口节点02"},
+	})
+	m.screen = screenNodes
+	m, _ = press(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	if page := ansi.Strip(m.View()); !strings.Contains(page, "Local ──▶ Entry 香港入口节点01 ──▶ Exit 美国出口节点02 ──▶ Target") {
+		t.Fatalf("English route is missing from the Nodes screen:\n%s", page)
+	}
+
+	m.settings.Language = config.LanguageChinese
+	m, _ = press(m, tea.WindowSizeMsg{Width: 38, Height: 24})
+	var route string
+	for line := range strings.SplitSeq(ansi.Strip(m.View()), "\n") {
+		if strings.Contains(line, "本机─▶") {
+			route = strings.TrimRight(line, " ")
+			break
+		}
+	}
+	if ansi.StringWidth(route) > m.width || !strings.Contains(route, "本机─▶入口 香港…─▶出口 美国…─▶目标") {
+		t.Fatalf("narrow Chinese route = %q", route)
+	}
+
+	m.settings.Active = "another-sub"
+	if page := ansi.Strip(m.View()); strings.Contains(page, "─▶") {
+		t.Fatalf("another subscription's route appeared on the Nodes screen:\n%s", page)
 	}
 }
 
