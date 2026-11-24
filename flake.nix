@@ -6,19 +6,20 @@
   outputs = { self, nixpkgs }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
+      version = self.shortRev or self.dirtyShortRev or "dev";
     in {
       packages = nixpkgs.lib.genAttrs systems (system:
         let
           pkgs = import nixpkgs { inherit system; };
           mihomo-king = pkgs.buildGoModule {
             pname = "mihomo-king";
-            version = self.shortRev or self.dirtyShortRev or "dev";
+            inherit version;
             src = self;
             subPackages = [ "." ];
-            vendorHash = pkgs.lib.fakeHash;
+            vendorHash = "sha256-cERBUF4PIgw6M9xuoB4dB2EYNGYyD6qWORlASioHFfk=";
 
             env.CGO_ENABLED = 0;
-            ldflags = [ "-s" "-w" "-X mihomo-king/internal/cli.Version=${self.shortRev or self.dirtyShortRev or "dev"}" ];
+            ldflags = [ "-s" "-w" "-X mihomo-king/internal/cli.Version=${version}" ];
 
             # Tests execute temporary scripts with /bin/sh from the host.
             doCheck = false;

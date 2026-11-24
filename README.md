@@ -72,6 +72,40 @@ make install        # binary to ~/.local/bin, bash/zsh completions to ~/.local/s
 `make build` uses glibc by default. `LIBC=musl` disables CGO and produces a
 static binary that runs on musl-based distributions without a libc dependency.
 
+### NixOS
+
+The flake builds `mihomo-king` from source for `x86_64-linux` and `aarch64-linux`
+and includes Bash and Zsh completions. With flakes enabled, use `nix run` to open
+the TUI or install the package into your user profile.
+
+```bash
+nix run github:jokergaming/mihomo-king
+nix profile add github:jokergaming/mihomo-king
+```
+
+For a system-wide installation, add the input to your NixOS flake and reference
+its package from `environment.systemPackages`.
+
+```nix
+# flake.nix
+inputs.mihomo-king.url = "github:jokergaming/mihomo-king";
+```
+
+```nix
+# Inside your nixosSystem modules, where inputs is your flake's inputs.
+({ pkgs, ... }: {
+  environment.systemPackages = [
+    inputs.mihomo-king.packages.${pkgs.stdenv.hostPlatform.system}.default
+    pkgs.mihomo
+  ];
+})
+```
+
+The core is installed separately. Update Nix-managed cores through your NixOS
+configuration. For the built-in core updater or `setcap` workflow, configure a
+core binary on a writable path. On NixOS, `pkgs.libcap` provides `setcap` and
+`getcap`, and `pkgs.iproute2` provides `ip`.
+
 ## Command line
 
 Every common TUI action is also a subcommand (built with

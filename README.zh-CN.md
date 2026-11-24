@@ -58,6 +58,37 @@ make install        # 程序安装到 ~/.local/bin，补全脚本安装到 ~/.lo
 
 `make build` 默认使用 glibc。`LIBC=musl` 关闭 CGO，生成不依赖系统 libc 的静态程序，可在 musl 发行版上运行。
 
+### NixOS
+
+Flake 支持在 `x86_64-linux` 和 `aarch64-linux` 上从源码构建，附带 Bash 和 Zsh 补全。
+启用 flakes 后，可以直接打开 TUI，也可以安装到当前用户的 profile。
+
+```bash
+nix run github:jokergaming/mihomo-king
+nix profile add github:jokergaming/mihomo-king
+```
+
+要在 NixOS 上全局安装，请在系统 flake 中添加输入，并在 `environment.systemPackages` 中引用软件包。
+
+```nix
+# flake.nix
+inputs.mihomo-king.url = "github:jokergaming/mihomo-king";
+```
+
+```nix
+# 放入 nixosSystem 的 modules 中，此处 inputs 为系统 flake 的输入。
+({ pkgs, ... }: {
+  environment.systemPackages = [
+    inputs.mihomo-king.packages.${pkgs.stdenv.hostPlatform.system}.default
+    pkgs.mihomo
+  ];
+})
+```
+
+代理核心需单独安装。通过 Nix 安装的核心由 NixOS 配置更新。
+如需使用应用内的核心更新或 `setcap` 授权，请将核心配置到可写路径。
+NixOS 上的 `pkgs.libcap` 提供 `setcap` 和 `getcap`，`pkgs.iproute2` 提供 `ip`。
+
 ## 命令行
 
 常用的 TUI 操作也提供命令行子命令，基于 [cobra](https://github.com/spf13/cobra) 实现。
