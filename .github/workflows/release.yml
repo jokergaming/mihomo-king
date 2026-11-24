@@ -28,11 +28,12 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       sha: ${{ steps.meta.outputs.sha }}
       version: ${{ steps.meta.outputs.version }}
+      notes: ${{ steps.meta.outputs.notes }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.sha }}
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || (github.ref_type == 'tag' && github.ref) || github.sha }}
 
       - name: Resolve release metadata
         id: meta
@@ -69,6 +70,15 @@ jobs:
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${tag}" != nightly && "$(git cat-file -t "refs/tags/${tag}")" == tag ]]; then
+            delimiter="$(uuidgen)"
+            {
+              echo "notes<<${delimiter}"
+              git for-each-ref --format='%(contents:subject)%0a%0a%(contents:body)' "refs/tags/${tag}"
+              echo "${delimiter}"
+            } >> "${GITHUB_OUTPUT}"
+          fi
 
   build:
     name: build ${{ matrix.goos }} ${{ matrix.goarch }} ${{ matrix.libc }}
@@ -217,6 +227,6 @@ jobs:
             dist/*.sha256
           prerelease: ${{ needs.prepare.outputs.tag == 'nightly' }}
           make_latest: ${{ needs.prepare.outputs.tag == 'nightly' && 'false' || 'true' }}
-          body: ${{ needs.prepare.outputs.tag == 'nightly' && format('Rolling build from main at commit {0}.', needs.prepare.outputs.sha) || '' }}
-          generate_release_notes: ${{ needs.prepare.outputs.tag != 'nightly' }}
+          body: ${{ needs.prepare.outputs.tag == 'nightly' && format('Rolling build from main at commit {0}.', needs.prepare.outputs.sha) || needs.prepare.outputs.notes }}
+          generate_release_notes: ${{ needs.prepare.outputs.tag != 'nightly' && !needs.prepare.outputs.notes }}
           overwrite_files: true
