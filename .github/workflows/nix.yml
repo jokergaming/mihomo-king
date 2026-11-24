@@ -1,0 +1,22 @@
+name: Nix
+
+on:
+  push:
+    branches:
+      - feature/nixos-flake
+
+permissions:
+  contents: read
+
+jobs:
+  pin-dependencies:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Resolve Nixpkgs and Go dependencies
+        run: |
+          nix flake lock
+          cat flake.lock
+          git add --intent-to-add flake.lock
+          nix build .#default.goModules --print-build-logs
