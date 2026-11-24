@@ -35,7 +35,7 @@ jobs:
           - system: aarch64-linux
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: cachix/install-nix-action@v31
       - name: Check flake
         run: nix flake check --no-update-lock-file --print-build-logs
@@ -46,7 +46,7 @@ jobs:
           profile="$RUNNER_TEMP/mihomo-king-profile"
           nix profile add --no-update-lock-file --profile "$profile" .#mihomo-king
           "$profile/bin/mihomo-king" --version
-          test -s "$profile/share/bash-completion/completions/mihomo-king"
+          test -s "$profile/share/bash-completion/completions/mihomo-king.bash"
           test -s "$profile/share/zsh/site-functions/_mihomo-king"
       - name: Evaluate NixOS system package configuration
         run: |
